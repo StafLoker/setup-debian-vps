@@ -15,6 +15,8 @@ echo " - System update & install necessary packages"
 
 echo " -- Start updating system"
 apt update && apt upgrade -y
+apt full-upgrade
+apt autoremove
 echo " -- Done"
 
 echo " -- Install sudo package"
