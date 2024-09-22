@@ -23,11 +23,29 @@ echo " -- Install sudo package"
 apt install -y sudo
 echo " -- Done"
 
+#######################
+### Change hostname ###
+#######################
+
+echo ">>>>> STEP 2 <<<<<"
+echo " - Change the hostname"
+
+read -p " -- Enter the new hostname [blank to skip]: " NEW_HOSTNAME
+
+if [ -n "$NEW_HOSTNAME" ]; then
+    echo " -- Changing the hostname to $NEW_HOSTNAME"
+    hostnamectl set-hostname "$NEW_HOSTNAME"
+    echo "127.0.1.1    $NEW_HOSTNAME" >> /etc/hosts
+    echo " -- Done"
+else
+    echo " -- No hostname provided, skipping."
+fi
+
 ############
 ### Root ###
 ############
 
-echo ">>>>> STEP 2 <<<<<"
+echo ">>>>> STEP 3 <<<<<"
 echo " - Change root password"
 
 while true; do
@@ -49,7 +67,7 @@ echo "root:$ROOT_PASSWORD" | chpasswd
 ### New user ###
 ################
 
-echo ">>>>> STEP 3 <<<<<"
+echo ">>>>> STEP 4 <<<<<"
 echo " - Create new users"
 
 while true; do
@@ -109,7 +127,7 @@ done
 ### SSH ###
 ###########
 
-echo ">>>>> STEP 4 <<<<<"
+echo ">>>>> STEP 5 <<<<<"
 echo " - Configure SSH"
 
 read -p " -- Enter the SSH public key to add for $USERNAME: " SSH_KEY
@@ -132,7 +150,7 @@ echo " -- Done"
 ### UFW ###
 ###########
 
-echo ">>>>> STEP 5 <<<<<"
+echo ">>>>> STEP 6 <<<<<"
 echo " - Configure firewall (UFW)"
 
 read -p " -- Do you want to install and configure UFW? [yes/no]: " INSTALL_UFW
@@ -161,16 +179,54 @@ fi
 ### Install other packages ###
 ##############################
 
-echo ">>>>> STEP 6 <<<<<"
+echo ">>>>> STEP 7 <<<<<"
 echo " - Install other packages"
 
 echo " -- Install curl package"
-apt install -y curl
+apt install -y curl wget vim
 echo " -- Done"
+
+#####################
+### Customization ###
+#####################
+
+echo ">>>>> STEP 8 <<<<<"
+echo " - Customization"
+
+### MOTD Setup ###
+###################
+
+read -p " -- Do you want to set up a custom welcome message (MOTD)? [yes/no]: " SETUP_MOTD
+
+if [[ "$SETUP_MOTD" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+    echo " -- Creating custom MOTD script..."
+
+    cat << EOF > /etc/update-motd.d/99-custom-message
+#!/bin/bash
+echo "Welcome to $(hostname), today is: $(date)"
+echo "Server IP: $(hostname -I)"
+echo "CPU Usage: $(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1}')%"
+echo "Ram Usage: $(free -m | grep Mem | awk '{print $3 "/" $2}') MB"
+echo "Disk Usage (/): $(df -h / | awk 'NR==2 {print $5}')"
+echo
+echo "Last connections:"
+last -a | head -n 5
+echo
+echo "Good job, $(whoami)!"
+EOF
+
+    chmod +x /etc/update-motd.d/99-custom-message
+    echo " -- Custom MOTD set up successfully."
+else
+    echo " -- MOTD setup skipped."
+fi
 
 ###############
 ### Options ###
 ###############
+
+echo ">>>>> STEP 9 <<<<<"
+echo " - Options"
 
 ### Install 3X-UI (XRAY Web manager)  ###
 #########################################
