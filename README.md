@@ -1,6 +1,6 @@
 # Setup script for Debian server
 
-Configuration include:
+Configuration includes [respect step order]:
 - System update & install necessary packages
   - sudo
 - Change root password
