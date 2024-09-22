@@ -3,6 +3,7 @@
 Configuration includes [respect step order]:
 - System update & install necessary packages
   - sudo
+- Change hostname
 - Change root password
 - Create new users
   - Add user to sudo group
@@ -11,5 +12,7 @@ Configuration includes [respect step order]:
 - Configure firewall (UFW)
 - Install other packages
   - curl
+- Customization
+  - MOTD Setup
 - Options
   - Install and configure 3X-UI
