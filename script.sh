@@ -223,7 +223,7 @@ echo " - Options"
 ### Install 3X-UI (XRAY Web manager)  ###
 #########################################
 
-read -p " -- Do you want to install and configure 3X-UI? [yes/no]" INSTALL_3X_UI
+read -p " -- Do you want to install and configure 3X-UI? [yes/no]: " INSTALL_3X_UI
 
 if [[ "$INSTALL_3X_UI" =~ ^([yY][eE][sS]|[yY])$ ]]; then
     echo " -- Install 3X-UI package"
