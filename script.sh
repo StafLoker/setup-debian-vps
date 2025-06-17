@@ -147,10 +147,10 @@ echo ">>>>> STEP 6 <<<<<"
 echo " - Configure firewall (UFW)"
 
 read -p " -- Do you want to install and configure UFW? [yes/no]: " INSTALL_UFW
-INSTALLED_UFW = 0
+INSTALLED_UFW=0
 
 if [[ "$INSTALL_UFW" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-    INSTALLED_UFW = 1
+    INSTALLED_UFW=1
     echo " -- Install ufw package"
     apt install -y ufw
     echo " -- Done"
