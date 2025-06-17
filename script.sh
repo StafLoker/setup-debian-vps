@@ -130,13 +130,6 @@ done
 echo ">>>>> STEP 5 <<<<<"
 echo " - Configure SSH"
 
-read -p " -- Enter the SSH public key to add for $USERNAME: " SSH_KEY
-
-echo " -- Setting up SSH key for $USERNAME..."
-su - $USERNAME -c "mkdir -p ~/.ssh && chmod 700 ~/.ssh"
-su - $USERNAME -c "echo '$SSH_KEY' > ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
-echo " -- Done"
-
 echo " -- Configuring SSH config (sshd_config)"
 sed -i 's/#Port 22/Port 403/' /etc/ssh/sshd_config
 sed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
@@ -212,7 +205,6 @@ echo
 echo "Last connections:"
 last -a | head -n 5
 echo
-echo "Good job, $(whoami)!"
 EOF
 
     chmod +x /etc/update-motd.d/99-custom-message
