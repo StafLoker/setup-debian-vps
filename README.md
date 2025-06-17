@@ -1,4 +1,4 @@
-# Setup script for Debian server
+# Setup script for Debian VPS server
 
 Configuration includes [respect step order]:
 - System update & install necessary packages
