@@ -1,124 +1,185 @@
 #!/bin/bash
 
+set -euo pipefail
+
+# Color Definitions
+readonly RED='\033[31m'
+readonly YELLOW='\033[33m'
+readonly GREEN='\033[32m'
+readonly PURPLE='\033[36m'
+readonly BLUE='\033[34m'
+readonly RESET='\033[0m'
+
+# Function to print INFO messages
+log_info() {
+    echo -e "${YELLOW}[INFO] $1${RESET}"
+}
+
+# Function to print SUCCESS messages
+log_success() {
+    echo -e "${GREEN}[SUCCESS] $1${RESET}"
+}
+
+# Function to print ERROR messages
+log_error() {
+    echo -e "${RED}[ERROR] $1${RESET}"
+}
+
+# Function to print WARNING messages
+log_warning() {
+    echo -e "${PURPLE}[WARNING] $1${RESET}"
+}
+
+# Function to print DEBUG messages
+log_debug() {
+    echo -e "${BLUE}[DEBUG] $1${RESET}"
+}
+
+# Function to ask yes/no questions
+ask_yes_no() {
+    local question="$1"
+    local default="${2:-n}"
+    local answer
+
+    while true; do
+        if [[ "$default" == "y" ]]; then
+            read -p "$question [Y/n]: " answer
+            answer=${answer:-y}
+        else
+            read -p "$question [y/N]: " answer
+            answer=${answer:-n}
+        fi
+
+        case ${answer,,} in
+            y|yes) return 0 ;;
+            n|no) return 1 ;;
+            *) log_warning "Please answer 'y' or 'n'" ;;
+        esac
+    done
+}
+
 #######################
 ### Welcome message ###
 #######################
 
-echo ">----- SETUP -----<"
+echo -e "${GREEN}>----- SETUP -----<${RESET}"
 
 #####################
 ### Update system ###
 #####################
 
-echo ">>>>> STEP 1 <<<<<"
-echo " - System update & install necessary packages"
+log_info "STEP 1"
+log_info "System update & install necessary packages"
 
-echo " -- Start updating system"
+log_debug "Start updating system"
 apt update && apt upgrade -y
 apt full-upgrade
 apt autoremove
-echo " -- Done"
+log_success "System update completed"
 
-echo " -- Install sudo package"
+log_debug "Install sudo package"
 apt install -y sudo
-echo " -- Done"
+log_success "Sudo package installed"
 
 #######################
 ### Change hostname ###
 #######################
 
-echo ">>>>> STEP 2 <<<<<"
-echo " - Change the hostname"
+log_info "STEP 2"
+log_info "Change the hostname"
 
-read -p " -- Enter the new hostname [blank to skip]: " NEW_HOSTNAME
+read -p "Enter the new hostname [blank to skip]: " NEW_HOSTNAME
 
 if [ -n "$NEW_HOSTNAME" ]; then
-    echo " -- Changing the hostname to $NEW_HOSTNAME"
+    log_debug "Changing the hostname to $NEW_HOSTNAME"
     hostnamectl set-hostname "$NEW_HOSTNAME"
     echo "127.0.1.1    $NEW_HOSTNAME" >> /etc/hosts
-    echo " -- Done"
+    log_success "Hostname changed to $NEW_HOSTNAME"
 else
-    echo " -- No hostname provided, skipping."
+    log_warning "No hostname provided, skipping"
 fi
 
 ############
 ### Root ###
 ############
 
-echo ">>>>> STEP 3 <<<<<"
-echo " - Change root password"
+log_info "STEP 3"
+log_info "Change root password"
 
 while true; do
-    read -s -p " -- Enter new root password: " ROOT_PASSWORD
+    read -s -p "Enter new root password: " ROOT_PASSWORD
     echo ""
-    read -s -p " -- Confirm new root password: " ROOT_PASSWORD_CONFIRM
+    read -s -p "Confirm new root password: " ROOT_PASSWORD_CONFIRM
     echo ""
     if [ "$ROOT_PASSWORD" == "$ROOT_PASSWORD_CONFIRM" ]; then
         break
     else
-        echo " -- Root passwords do not match. Please try again."
+        log_error "Root passwords do not match. Please try again."
     fi
 done
 
-echo " -- Changing root password..."
+log_debug "Changing root password..."
 echo "root:$ROOT_PASSWORD" | chpasswd
+log_success "Root password changed successfully"
 
 ################
 ### New user ###
 ################
 
-echo ">>>>> STEP 4 <<<<<"
-echo " - Create new users"
+log_info "STEP 4"
+log_info "Create new users"
+
+CREATED_USERS=()
+SUDO_USERS=()
 
 while true; do
 
     #### Username & password setup ####
 
-    read -p " -- Enter the username of new user: " USERNAME
+    read -p "Enter the username of new user: " USERNAME
 
     while true; do
-        read -s -p " -- Enter password for the new user ($USERNAME): " PASSWORD
+        read -s -p "Enter password for the new user ($USERNAME): " PASSWORD
         echo ""
-        read -s -p " -- Confirm password for the new user ($USERNAME): " PASSWORD_CONFIRM
+        read -s -p "Confirm password for the new user ($USERNAME): " PASSWORD_CONFIRM
         echo ""
         if [ "$PASSWORD" == "$PASSWORD_CONFIRM" ]; then
             break
         else
-            echo " -- Passwords do not match. Please try again."
+            log_error "Passwords do not match. Please try again."
         fi
     done
 
-    echo " -- Creating $USERNAME..."
+    log_debug "Creating $USERNAME..."
     useradd -m -s /bin/bash $USERNAME
     echo "$USERNAME:$PASSWORD" | chpasswd
-    echo " -- Done"
+    log_success "User $USERNAME created successfully"
+    
+    # Add to created users array
+    CREATED_USERS+=("$USERNAME")
 
     #### Sudo setup ####
 
-    read -p " -- Add user $USERNAME to sudo group? [yes/no]: " USER_ADD_SUDO
-
-    if [[ "$USER_ADD_SUDO" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-        echo " -- Adding $USERNAME to the sudo group..."
+    if ask_yes_no "Add user $USERNAME to sudo group?"; then
+        log_debug "Adding $USERNAME to the sudo group..."
         usermod -aG sudo $USERNAME
-        echo " -- Done"
+        log_success "$USERNAME added to sudo group"
+        # Add to sudo users array
+        SUDO_USERS+=("$USERNAME")
     fi
 
     #### SSH key setup ####
 
-    read -p " -- Add an SSH key for user $USERNAME? [yes/no]: " ADD_SSH_KEY
+    if ask_yes_no "Add an SSH key for user $USERNAME?"; then
+        read -p "Enter the SSH public key for $USERNAME: " SSH_KEY
 
-    if [[ "$ADD_SSH_KEY" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-        read -p " -- Enter the SSH public key for $USERNAME: " SSH_KEY
-
-        echo " -- Setting up SSH key for $USERNAME..."
+        log_debug "Setting up SSH key for $USERNAME..."
         su - $USERNAME -c "mkdir -p ~/.ssh && chmod 700 ~/.ssh"
         su - $USERNAME -c "echo '$SSH_KEY' > ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
-        echo " -- SSH key added for $USERNAME."
+        log_success "SSH key added for $USERNAME"
     fi
 
-    read -p " -- Create one more user? [yes/no]: " CREATE_MORE_USER
-
-    if [[ ! "$CREATE_MORE_USER" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+    if ! ask_yes_no "Create one more user?"; then
         break
     fi
 done
@@ -127,72 +188,68 @@ done
 ### SSH ###
 ###########
 
-echo ">>>>> STEP 5 <<<<<"
-echo " - Configure SSH"
+log_info "STEP 5"
+log_info "Configure SSH"
 
-echo " -- Configuring SSH config (sshd_config)"
+log_debug "Configuring SSH config (sshd_config)"
 sed -i 's/#Port 22/Port 403/' /etc/ssh/sshd_config
 sed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
 sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
 
-echo " -- Restarting SSH service..."
+log_debug "Restarting SSH service..."
 systemctl restart sshd
-echo " -- Done"
+log_success "SSH configuration completed"
 
 ###########
 ### UFW ###
 ###########
 
-echo ">>>>> STEP 6 <<<<<"
-echo " - Configure firewall (UFW)"
+log_info "STEP 6"
+log_info "Configure firewall (UFW)"
 
-read -p " -- Do you want to install and configure UFW? [yes/no]: " INSTALL_UFW
 INSTALLED_UFW=0
 
-if [[ "$INSTALL_UFW" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+if ask_yes_no "Do you want to install and configure UFW?" "y"; then
     INSTALLED_UFW=1
-    echo " -- Install ufw package"
+    log_debug "Install ufw package"
     apt install -y ufw
-    echo " -- Done"
+    log_success "UFW package installed"
 
-    echo " -- Configuring UFW..."
+    log_debug "Configuring UFW..."
     ufw allow 403/tcp       # Allow SSH on port 403
-    ufw allow 443/tcp       # Allow HTTPS (TLS) on port 443
-    echo " -- Done"
+    log_success "UFW configured successfully"
 
-    echo " -- Results"
+    log_info "UFW status:"
     ufw status
 
-    echo " -- After finishing the system configuration, you can run UFW"
+    log_warning "After finishing the system configuration, you can run UFW"
 else
-    echo " -- UFW installation and configuration skipped."
+    log_warning "UFW installation and configuration skipped"
 fi
 
 ##############################
 ### Install other packages ###
 ##############################
 
-echo ">>>>> STEP 7 <<<<<"
-echo " - Install other packages"
+log_info "STEP 7"
+log_info "Install other packages"
 
-echo " -- Install curl package"
+log_debug "Install curl, wget, vim packages"
 apt install -y curl wget vim
-echo " -- Done"
+log_success "Additional packages installed"
 
 #####################
 ### Customization ###
 #####################
 
-echo ">>>>> STEP 8 <<<<<"
-echo " - Customization"
+log_info "STEP 8"
+log_info "Customization"
 
 ### MOTD Setup ###
 ###################
 
-read -p " -- Do you want to set up a custom welcome message (MOTD)? [yes/no]: " SETUP_MOTD
-
-if [[ "$SETUP_MOTD" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-    echo " -- Creating custom MOTD script..."
+if ask_yes_no "Do you want to set up a custom welcome message (MOTD)?"; then
+    log_debug "Creating custom MOTD script..."
 
     cat << EOF > /etc/update-motd.d/99-custom-message
 #!/bin/bash
@@ -208,45 +265,141 @@ echo
 EOF
 
     chmod +x /etc/update-motd.d/99-custom-message
-    echo " -- Custom MOTD set up successfully."
+    log_success "Custom MOTD set up successfully"
 else
-    echo " -- MOTD setup skipped."
+    log_warning "MOTD setup skipped"
 fi
 
-###############
-### Options ###
-###############
+#####################
+### Podman & Node ###
+#####################
 
 echo ">>>>> STEP 9 <<<<<"
-echo " - Options"
+echo " - Podman & RemnaNode Installation"
 
-### Install 3X-UI (XRAY Web manager)  ###
-#########################################
+### Podman Installation ###
+############################
 
-read -p " -- Do you want to install and configure 3X-UI? [yes/no]: " INSTALL_3X_UI
+read -p " -- Do you want to install Podman and RemnaNode? [yes/no]: " INSTALL_PODMAN
 
-if [[ "$INSTALL_3X_UI" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-    echo " -- Install 3X-UI package"
-    bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
-    echo " -- Done"
+if [[ "$INSTALL_PODMAN" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+    echo " -- Installing Podman..."
+    sudo apt-get update
+    sudo apt-get -y install podman
+    echo " -- Podman installed successfully"
 
-    if [ $INSTALLED_UFW -eq 1 ]; then
-        read -p " -- Add web panel port to UFW rule (allow), enter port: " WEB_PANEL_PORT
+    ### User Selection ###
+    ######################
+
+    echo " -- Available users:"
+    cat /etc/passwd | grep -E ":[0-9]{4}:" | cut -d: -f1
+    echo ""
+    read -p " -- Enter the username to install RemnaNode for: " REMNA_USER
+
+    # Verify user exists
+    if ! id "$REMNA_USER" &>/dev/null; then
+        echo " -- ERROR: User $REMNA_USER does not exist!"
+        echo " -- Skipping RemnaNode installation."
+    else
+        ### RemnaNode Configuration ###
+        ###############################
+
+        echo " -- Configuring RemnaNode for user $REMNA_USER..."
+
+        # Create configuration directory
+        sudo mkdir -p /etc/remnanode
         
-        if [ -n "$WEB_PANEL_PORT" ]; then
-            ufw allow "$WEB_PANEL_PORT/tcp"
-            echo " -- Port $WEB_PANEL_PORT added to UFW rules (TCP)"
-        else
-            echo " -- No port entered. Skipping UFW rule addition."
-        fi
-    fi
+        # Get port configuration
+        read -p " -- Enter the port for RemnaNode (default: 5777): " REMNA_PORT
+        REMNA_PORT=${REMNA_PORT:-5777}
 
+        # Get SSL certificate
+        echo " -- Enter the SSL certificate (copy from main panel):"
+        echo " -- Format: SSL_CERT=\"CERT_FROM_MAIN_PANEL\""
+        read -p " -- SSL Certificate: " SSL_CERT
+
+        # Create .env file
+        echo " -- Creating environment configuration..."
+        sudo tee /etc/remnanode/.env > /dev/null <<EOF
+APP_PORT=$REMNA_PORT
+SSL_CERT="$SSL_CERT"
+EOF
+
+        echo " -- Environment file created at /etc/remnanode/.env"
+
+        ### Firewall Configuration ###
+        ###############################
+
+        echo " -- Configuring firewall for port $REMNA_PORT..."
+        sudo ufw allow $REMNA_PORT
+        echo " -- UFW rule added for port $REMNA_PORT"
+
+        ### Run Container and Generate Systemd ###
+        ###########################################
+
+        echo " -- Running RemnaNode container..."
+        sudo -u $REMNA_USER podman run --label "io.containers.autoupdate=image" \
+            --name remnanode \
+            --hostname remnanode \
+            --network host \
+            --env-file /etc/remnanode/.env \
+            --detach \
+            remnawave/node:latest
+
+        echo " -- Generating systemd service..."
+        sudo -u $REMNA_USER podman generate systemd --new --files --name remnanode
+
+        echo " -- Installing systemd service..."
+        sudo -u $REMNA_USER mkdir -p /home/$REMNA_USER/.config/systemd/user
+        sudo -u $REMNA_USER mv container-remnanode.service /home/$REMNA_USER/.config/systemd/user/
+        
+        # Enable linger first
+        echo " -- Enabling linger for user $REMNA_USER..."
+        sudo loginctl enable-linger $REMNA_USER
+        echo " -- Linger enabled - service will start automatically on boot"
+
+        # Enable and start the user service
+        echo " -- Enabling and starting RemnaNode service..."
+        sudo -u $REMNA_USER systemctl --user daemon-reload
+        sudo -u $REMNA_USER systemctl --user enable container-remnanode
+        sudo -u $REMNA_USER systemctl --user start container-remnanode
+
+        echo " -- Checking service status..."
+        sudo -u $REMNA_USER systemctl --user status container-remnanode --no-pager -l
+
+        echo " -- RemnaNode installation completed!"
+        echo " -- Service is running on port $REMNA_PORT"
+        echo " -- You can check logs with: sudo journalctl -u remnanode -f"
+    fi
 else
-    echo " -- 3X-UI installation and configuration skipped."
+    echo " -- Podman and RemnaNode installation skipped."
 fi
 
 ##########################
 ### Completion message ###
 ##########################
 
-echo ">----- SETUP COMPLETE -----<"
+echo -e "${GREEN}>----- SETUP COMPLETE -----<${RESET}"
+
+if [[ "$INSTALLED_UFW" -eq 1 ]]; then
+    if ask_yes_no "Do you want to enable UFW now?" "y"; then
+        log_debug "Enabling UFW..."
+        ufw --force enable
+        log_success "UFW enabled successfully"
+        ufw status
+    else
+        log_warning "UFW not enabled. You can enable it later with: sudo ufw enable"
+    fi
+fi
+
+if [[ "${INSTALL_PODMAN:-n}" =~ ^([yY][eE][sS]|[yY])$ ]] && [ ${#SUDO_USERS[@]} -gt 0 ] && [[ -n "${REMNA_USER:-}" ]]; then
+    echo ""
+    log_success "RemnaNode Information:"
+    echo "- Service: container-remnanode (user service)"
+    echo "- Port: $REMNA_PORT"
+    echo "- User: $REMNA_USER"
+    echo "- Config: /etc/remnanode/.env"
+    echo "- Status: sudo -u $REMNA_USER systemctl --user status container-remnanode"
+    echo "- Logs: sudo -u $REMNA_USER journalctl --user -u container-remnanode -f"
+    echo ""
+fi
