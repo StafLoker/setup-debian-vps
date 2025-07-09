@@ -27,9 +27,6 @@ The script follows a specific order for optimal server configuration:
 - System update and upgrade
 - Install necessary packages:
   - sudo
-  - curl
-  - wget
-  - vim
 
 ### **STEP 2 - Change Hostname**
 - Optional hostname configuration
@@ -45,13 +42,13 @@ The script follows a specific order for optimal server configuration:
 - SSH key configuration for users
 
 ### **STEP 5 - SSH Configuration**
-- Change SSH port to 403
+- Change SSH port to custom one
 - Disable root login
 - Disable password authentication
 
 ### **STEP 6 - Firewall (UFW)**
 - Install and configure UFW
-- Allow SSH on port 403
+- Allow SSH on custom port
 - Optional activation at the end
 
 ### **STEP 7 - Additional Packages**
@@ -71,29 +68,6 @@ The script follows a specific order for optimal server configuration:
   - User-specific systemd service
   - Automatic startup configuration
   - Port publishing and firewall rules
-
-## **Features**
-
-### **Security**
-- ✅ Secure SSH configuration
-- ✅ UFW firewall setup
-- ✅ Root login disabled
-- ✅ Password authentication disabled
-- ✅ User privilege management
-
-### **User Experience**
-- 🎨 Colored output for better readability
-- ✅ Input validation and error handling
-- 🔄 Robust yes/no prompts
-- 📝 Comprehensive logging
-- 🛡️ Safe execution with error handling
-
-### **Services**
-- 🐳 Podman container support
-- 🌐 RemnaNode blockchain node
-- 🔧 Systemd service generation
-- 🔄 Auto-restart capabilities
-- 📊 System monitoring setup
 
 ## **License**
 This project is open source and available under standard terms.
