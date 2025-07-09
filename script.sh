@@ -191,14 +191,18 @@ done
 log_info "STEP 5"
 log_info "Configure SSH"
 
+# Get SSH port configuration
+read -p "Enter SSH port (default: 403): " SSH_PORT
+SSH_PORT=${SSH_PORT:-403}
+
 log_debug "Configuring SSH config (sshd_config)"
-sed -i 's/#Port 22/Port 403/' /etc/ssh/sshd_config
+sed -i "s/#Port 22/Port $SSH_PORT/" /etc/ssh/sshd_config
 sed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
 sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
 
 log_debug "Restarting SSH service..."
 systemctl restart sshd
-log_success "SSH configuration completed"
+log_success "SSH configuration completed on port $SSH_PORT"
 
 ###########
 ### UFW ###
@@ -216,8 +220,8 @@ if ask_yes_no "Do you want to install and configure UFW?" "y"; then
     log_success "UFW package installed"
 
     log_debug "Configuring UFW..."
-    ufw allow 403/tcp       # Allow SSH on port 403
-    log_success "UFW configured successfully"
+    ufw allow $SSH_PORT/tcp       # Allow SSH on configured port
+    log_success "UFW configured successfully (SSH port $SSH_PORT allowed)"
 
     log_info "UFW status:"
     ufw status
