@@ -275,108 +275,141 @@ else
 fi
 
 #####################
-### Podman & Node ###
+### Podman & Remnanode ###
 #####################
 
-echo ">>>>> STEP 9 <<<<<"
-echo " - Podman & RemnaNode Installation"
+log_info "STEP 9"
+log_info "Podman & Remnanode Installation"
 
 ### Podman Installation ###
 ############################
 
-read -p " -- Do you want to install Podman and RemnaNode? [yes/no]: " INSTALL_PODMAN
-
-if [[ "$INSTALL_PODMAN" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-    echo " -- Installing Podman..."
-    sudo apt-get update
-    sudo apt-get -y install podman
-    echo " -- Podman installed successfully"
+if ask_yes_no "Do you want to install Podman and Remnanode?"; then
+    log_debug "Installing Podman..."
+    apt-get update
+    apt-get -y install podman
+    log_success "Podman installed successfully"
 
     ### User Selection ###
     ######################
 
-    echo " -- Available users:"
-    cat /etc/passwd | grep -E ":[0-9]{4}:" | cut -d: -f1
-    echo ""
-    read -p " -- Enter the username to install RemnaNode for: " REMNA_USER
-
-    # Verify user exists
-    if ! id "$REMNA_USER" &>/dev/null; then
-        echo " -- ERROR: User $REMNA_USER does not exist!"
-        echo " -- Skipping RemnaNode installation."
+    log_info "Available sudo users for Remnanode installation:"
+    if [ ${#SUDO_USERS[@]} -eq 0 ]; then
+        log_error "No sudo users available. Remnanode requires a sudo user."
+        log_warning "Skipping Remnanode installation."
     else
-        ### RemnaNode Configuration ###
+        # Print available sudo users
+        for user in "${SUDO_USERS[@]}"; do
+            log_info "- $user"
+        done
+        echo ""
+        
+        # Loop until valid user is selected
+        while true; do
+            read -p "Enter the username to install Remnanode for: " REMNA_USER
+            
+            # Check if user exists and is in SUDO_USERS array
+            if [[ " ${SUDO_USERS[*]} " =~ " ${REMNA_USER} " ]]; then
+                log_success "User $REMNA_USER selected for Remnanode installation"
+                break
+            else
+                log_error "User $REMNA_USER is not in the sudo users list or does not exist!"
+                log_warning "Please select a user from the available sudo users list above."
+            fi
+        done
+
+        ### Remnanode Configuration ###
         ###############################
 
-        echo " -- Configuring RemnaNode for user $REMNA_USER..."
+        log_info "Configuring Remnanode for user $REMNA_USER..."
 
         # Create configuration directory
-        sudo mkdir -p /etc/remnanode
+        mkdir -p /etc/remnanode
         
         # Get port configuration
-        read -p " -- Enter the port for RemnaNode (default: 5777): " REMNA_PORT
+        read -p "Enter the port for Remnanode (default: 5777): " REMNA_PORT
         REMNA_PORT=${REMNA_PORT:-5777}
 
         # Get SSL certificate
-        echo " -- Enter the SSL certificate (copy from main panel):"
-        echo " -- Format: SSL_CERT=\"CERT_FROM_MAIN_PANEL\""
-        read -p " -- SSL Certificate: " SSL_CERT
+        log_info "Enter the SSL certificate (copy from main panel):"
+        log_info "Format: SSL_CERT=\"CERT_FROM_MAIN_PANEL\""
+        
+        while true; do
+            read -p "SSL Certificate: " SSL_CERT_INPUT
+            
+            # Check if input starts with SSL_CERT= and remove it
+            if [[ "$SSL_CERT_INPUT" =~ ^SSL_CERT= ]]; then
+                # Remove SSL_CERT= prefix and quotes if present
+                SSL_CERT="${SSL_CERT_INPUT#SSL_CERT=}"
+                SSL_CERT="${SSL_CERT%\"}"  # Remove trailing quote
+                SSL_CERT="${SSL_CERT#\"}"  # Remove leading quote
+                log_debug "Cleaned SSL_CERT input"
+            else
+                SSL_CERT="$SSL_CERT_INPUT"
+            fi
+            
+            # Validate that we have some content
+            if [[ -n "$SSL_CERT" ]]; then
+                break
+            else
+                log_error "SSL certificate cannot be empty. Please provide a valid certificate."
+            fi
+        done
 
         # Create .env file
-        echo " -- Creating environment configuration..."
-        sudo tee /etc/remnanode/.env > /dev/null <<EOF
+        log_debug "Creating environment configuration..."
+        tee /etc/remnanode/.env > /dev/null <<EOF
 APP_PORT=$REMNA_PORT
 SSL_CERT="$SSL_CERT"
 EOF
 
-        echo " -- Environment file created at /etc/remnanode/.env"
+        # Set proper permissions for the .env file
+        chown $REMNA_USER:$REMNA_USER /etc/remnanode/.env
+        chmod 600 /etc/remnanode/.env
+
+        log_success "Environment file created at /etc/remnanode/.env"
 
         ### Firewall Configuration ###
         ###############################
 
-        echo " -- Configuring firewall for port $REMNA_PORT..."
-        sudo ufw allow $REMNA_PORT
-        echo " -- UFW rule added for port $REMNA_PORT"
+        log_debug "Configuring firewall for port $REMNA_PORT..."
+        ufw allow $REMNA_PORT
+        log_success "UFW rule added for port $REMNA_PORT"
 
         ### Run Container and Generate Systemd ###
         ###########################################
 
-        echo " -- Running RemnaNode container..."
-        sudo -u $REMNA_USER podman run --label "io.containers.autoupdate=image" \
+        log_debug "Running Remnanode container..."
+        sudo -u $REMNA_USER podman run \
             --name remnanode \
-            --hostname remnanode \
-            --network host \
+            --publish "$REMNA_PORT:$REMNA_PORT" \
             --env-file /etc/remnanode/.env \
             --detach \
-            remnawave/node:latest
+            docker.io/remnawave/node:latest
 
-        echo " -- Generating systemd service..."
+        log_debug "Generating systemd service..."
         sudo -u $REMNA_USER podman generate systemd --new --files --name remnanode
-
-        echo " -- Installing systemd service..."
-        sudo -u $REMNA_USER mkdir -p /home/$REMNA_USER/.config/systemd/user
-        sudo -u $REMNA_USER mv container-remnanode.service /home/$REMNA_USER/.config/systemd/user/
         
         # Enable linger first
-        echo " -- Enabling linger for user $REMNA_USER..."
-        sudo loginctl enable-linger $REMNA_USER
-        echo " -- Linger enabled - service will start automatically on boot"
+        log_debug "Enabling linger for user $REMNA_USER..."
+        loginctl enable-linger $REMNA_USER
+        log_success "Linger enabled - service will start automatically on boot"
 
         # Enable and start the user service
-        echo " -- Enabling and starting RemnaNode service..."
+        log_debug "Enabling and starting Remnanode service..."
         sudo -u $REMNA_USER systemctl --user daemon-reload
         sudo -u $REMNA_USER systemctl --user enable container-remnanode
         sudo -u $REMNA_USER systemctl --user start container-remnanode
 
-        echo " -- Checking service status..."
+        log_debug "Checking service status..."
         sudo -u $REMNA_USER systemctl --user status container-remnanode --no-pager -l
 
-        echo " -- RemnaNode installation completed!"
-        echo " -- Service is running on port $REMNA_PORT"
-        echo " -- You can check logs with: sudo journalctl -u remnanode -f"
+        log_success "Remnanode installation completed!"
+        log_success "Service is running on port $REMNA_PORT"
+        log_info "You can check logs with: sudo -u $REMNA_USER journalctl --user -u container-remnanode -f"
     fi
 else
-    echo " -- Podman and RemnaNode installation skipped."
+    log_warning "Podman and Remnanode installation skipped."
 fi
 
 ##########################
@@ -399,11 +432,11 @@ fi
 if [[ "${INSTALL_PODMAN:-n}" =~ ^([yY][eE][sS]|[yY])$ ]] && [ ${#SUDO_USERS[@]} -gt 0 ] && [[ -n "${REMNA_USER:-}" ]]; then
     echo ""
     log_success "RemnaNode Information:"
-    echo "- Service: container-remnanode (user service)"
-    echo "- Port: $REMNA_PORT"
-    echo "- User: $REMNA_USER"
-    echo "- Config: /etc/remnanode/.env"
-    echo "- Status: sudo -u $REMNA_USER systemctl --user status container-remnanode"
-    echo "- Logs: sudo -u $REMNA_USER journalctl --user -u container-remnanode -f"
+    log_info "- Service: container-remnanode (user service)"
+    log_info "- Port: $REMNA_PORT"
+    log_info "- User: $REMNA_USER"
+    log_info "- Config: /etc/remnanode/.env"
+    log_debug "- Status: sudo -u $REMNA_USER systemctl --user status container-remnanode"
+    log_debug "- Logs: sudo -u $REMNA_USER journalctl --user -u container-remnanode -f"
     echo ""
 fi
