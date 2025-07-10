@@ -239,7 +239,7 @@ log_info "STEP 7"
 log_info "Install other packages"
 
 log_debug "Install curl, wget, vim packages"
-apt install -y curl wget vim
+apt install -y wget vim
 log_success "Additional packages installed"
 
 #####################
@@ -274,9 +274,9 @@ else
     log_warning "MOTD setup skipped"
 fi
 
-#####################
+##########################
 ### Podman & Remnanode ###
-#####################
+##########################
 
 log_info "STEP 9"
 log_info "Podman & Remnanode Installation"
