@@ -63,6 +63,15 @@ ask_yes_no() {
     done
 }
 
+run_as_user() {
+    local user="$1"
+    local cmd="$2"
+    local user_id=$(id -u "$user")
+    local runtime_dir="/run/user/$user_id"
+    
+    sudo -u "$user" -H env XDG_RUNTIME_DIR="$runtime_dir" bash -c "$cmd"
+}
+
 # System update and basic packages
 system_update() {
     log_debug "Start updating system"
@@ -309,6 +318,12 @@ install_remnanode() {
         fi
     done
 
+    ### Install required packages ###
+    log_debug "Installing required packages for systemd user session..."
+    apt-get update
+    apt-get install -y dbus-user-session systemd-container
+    log_success "Required packages installed"
+
     ### Remnanode Configuration ###
     log_info "Configuring Remnanode for user $REMNA_USER..."
 
@@ -363,39 +378,61 @@ EOF
     ufw allow $REMNA_PORT
     log_success "UFW rule added for port $REMNA_PORT"
 
-    ### Run Container and Generate Systemd ###
+    ### Enable linger first ###
+    log_debug "Enabling linger for user $REMNA_USER..."
+    loginctl enable-linger $REMNA_USER
+    log_success "Linger enabled - service will start automatically on boot"
+
+    ### Configure Podman for the user ###
+    log_debug "Configuring Podman for user $REMNA_USER..."
+    
+    # Set cgroup manager to systemd for the user
+    run_as_user "$REMNA_USER" "mkdir -p /home/$REMNA_USER/.config/containers"
+    run_as_user "$REMNA_USER" "cat > /home/$REMNA_USER/.config/containers/containers.conf << 'EOF'
+[containers]
+cgroup_manager = \"systemd\"
+EOF"
+
+    # Create user systemd directory
+    run_as_user "$REMNA_USER" "mkdir -p /home/$REMNA_USER/.config/systemd/user"
+
+    ### Setup environment variables ###
+    local USER_ID=$(id -u $REMNA_USER)
+    local XDG_RUNTIME_DIR="/run/user/$USER_ID"
+    
+    # Ensure the runtime directory exists
+    mkdir -p "$XDG_RUNTIME_DIR"
+    chown $REMNA_USER:$REMNA_USER "$XDG_RUNTIME_DIR"
+    chmod 700 "$XDG_RUNTIME_DIR"
+
+    ### Run Container ###
     log_debug "Running Remnanode container..."
-    sudo -u $REMNA_USER -H bash -c "cd /home/$REMNA_USER && podman run \
+    run_as_user "$REMNA_USER" "cd /home/$REMNA_USER && podman run \
         --name remnanode \
         --publish $REMNA_PORT:$REMNA_PORT \
         --env-file /etc/remnanode/.env \
         --detach \
         docker.io/remnawave/node:latest"
 
+    ### Generate systemd service ###
     log_debug "Generating systemd service..."
-    sudo -u $REMNA_USER -H bash -c "cd /home/$REMNA_USER && podman generate systemd --new --files --name remnanode"
-    
-    log_debug "Setting up systemd service..."
-    sudo -u $REMNA_USER -H bash -c "mkdir -p /home/$REMNA_USER/.config/systemd/user"
-    sudo -u $REMNA_USER -H bash -c "mv /home/$REMNA_USER/container-remnanode.service /home/$REMNA_USER/.config/systemd/user/"
-    
-    # Enable linger first
-    log_debug "Enabling linger for user $REMNA_USER..."
-    loginctl enable-linger $REMNA_USER
-    log_success "Linger enabled - service will start automatically on boot"
+    run_as_user "$REMNA_USER" "cd /home/$REMNA_USER && podman generate systemd --new --files --name remnanode"
+    run_as_user "$REMNA_USER" "mv /home/$REMNA_USER/container-remnanode.service /home/$REMNA_USER/.config/systemd/user/"
 
-    # Enable and start the user service
+    ### Enable and start the service ###
     log_debug "Enabling and starting Remnanode service..."
-    sudo -u $REMNA_USER XDG_RUNTIME_DIR="/run/user/$(id -u $REMNA_USER)" systemctl --user daemon-reload
-    sudo -u $REMNA_USER XDG_RUNTIME_DIR="/run/user/$(id -u $REMNA_USER)" systemctl --user enable container-remnanode
-    sudo -u $REMNA_USER XDG_RUNTIME_DIR="/run/user/$(id -u $REMNA_USER)" systemctl --user start container-remnanode
-    
+    run_as_user "$REMNA_USER" "systemctl --user daemon-reload"
+    run_as_user "$REMNA_USER" "systemctl --user enable container-remnanode"
+    run_as_user "$REMNA_USER" "systemctl --user start container-remnanode"
+
+    ### Check service status ###
     log_debug "Checking service status..."
-    sudo -u $REMNA_USER XDG_RUNTIME_DIR="/run/user/$(id -u $REMNA_USER)" systemctl --user status container-remnanode --no-pager -l
+    run_as_user "$REMNA_USER" "systemctl --user status container-remnanode --no-pager -l"
 
     log_success "Remnanode installation completed!"
     log_success "Service is running on port $REMNA_PORT"
     log_info "You can check logs with: sudo -u $REMNA_USER XDG_RUNTIME_DIR=\"/run/user/\$(id -u $REMNA_USER)\" journalctl --user -u container-remnanode -f"
+    log_info "You can check service status with: sudo -u $REMNA_USER XDG_RUNTIME_DIR=\"/run/user/\$(id -u $REMNA_USER)\" systemctl --user status container-remnanode"
 }
 
 # Docker Installation Function
