@@ -72,24 +72,25 @@ The script follows a modular approach with specific steps for optimal server con
 Interactive menu-driven installation of containerization services:
 
 #### **Available Options:**
-1. **Podman** - Daemonless container runtime
-   - Rootless container support
-   - Docker-compatible CLI
-
-2. **Remnanode** - Container service management
-   - **Requires Podman** (auto-installs if needed)
-   - SSL certificate configuration
-   - Custom port setup (default: 5777)
-   - User-specific systemd service
-   - Automatic startup with linger
-   - Firewall rule configuration
-
-3. **Docker** - Traditional container runtime
+1. **Docker** - Container runtime with compose
    - Official Docker Engine installation
    - Docker Compose plugin included
    - Complete container ecosystem
-
-4. **Exit** - Complete optional installations
+   - **Post-installation user setup**: Select sudo users to add to docker group
+   
+2. **Remnanode** - Container service management
+   - **Requires Docker** (auto-installs if needed)
+   - **System-wide installation** in `/opt/remnanode`
+   - SSL certificate configuration
+   - Custom port setup (default: 5777)
+   - Docker Compose deployment
+   - **Flexible port management**: Add additional ports with multiple formats:
+     - `333` (default protocol)
+     - `333/tcp` (TCP protocol)
+     - `333/udp` (UDP protocol)
+   - Automatic firewall rule configuration
+   
+3. **Exit** - Complete optional installations
 
 ## **Features**
 

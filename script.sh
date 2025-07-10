@@ -63,6 +63,45 @@ ask_yes_no() {
     done
 }
 
+# Configure additional ports
+configure_additional_ports() {
+    log_info "Enter additional ports to open (enter 0 to finish):"
+    log_info "Formats accepted: 333, 333/tcp, 333/udp"
+    
+    while true; do
+        read -p "Enter port (0 to finish): " PORT
+        
+        if [[ "$PORT" == "0" ]]; then
+            log_info "Finished configuring additional ports"
+            break
+        fi
+        
+        # Validate port format (number, number/tcp, number/udp)
+        if [[ "$PORT" =~ ^[0-9]+$ ]]; then
+            # Just a number, validate range
+            if [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ]; then
+                log_debug "Opening port $PORT..."
+                ufw allow $PORT
+                log_success "Port $PORT opened successfully"
+            else
+                log_error "Invalid port number. Please enter a number between 1 and 65535, or 0 to finish."
+            fi
+        elif [[ "$PORT" =~ ^[0-9]+/(tcp|udp)$ ]]; then
+            # Number with protocol, extract port number for validation
+            PORT_NUM=$(echo "$PORT" | cut -d'/' -f1)
+            if [ "$PORT_NUM" -ge 1 ] && [ "$PORT_NUM" -le 65535 ]; then
+                log_debug "Opening port $PORT..."
+                ufw allow $PORT
+                log_success "Port $PORT opened successfully"
+            else
+                log_error "Invalid port number. Please enter a number between 1 and 65535, or 0 to finish."
+            fi
+        else
+            log_error "Invalid port format. Use: 333, 333/tcp, or 333/udp (or 0 to finish)."
+        fi
+    done
+}
+
 # System update and basic packages
 system_update() {
     log_debug "Start updating system"
@@ -404,45 +443,6 @@ EOF
     log_info "You can check logs with: docker logs remnanode"
     log_info "You can stop the service with: docker compose -f $REMNA_DIR/docker-compose.yml down"
     log_info "You can start the service with: docker compose -f $REMNA_DIR/docker-compose.yml up -d"
-}
-
-# Configure additional ports
-configure_additional_ports() {
-    log_info "Enter additional ports to open (enter 0 to finish):"
-    log_info "Formats accepted: 333, 333/tcp, 333/udp"
-    
-    while true; do
-        read -p "Enter port (0 to finish): " PORT
-        
-        if [[ "$PORT" == "0" ]]; then
-            log_info "Finished configuring additional ports"
-            break
-        fi
-        
-        # Validate port format (number, number/tcp, number/udp)
-        if [[ "$PORT" =~ ^[0-9]+$ ]]; then
-            # Just a number, validate range
-            if [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ]; then
-                log_debug "Opening port $PORT..."
-                ufw allow $PORT
-                log_success "Port $PORT opened successfully"
-            else
-                log_error "Invalid port number. Please enter a number between 1 and 65535, or 0 to finish."
-            fi
-        elif [[ "$PORT" =~ ^[0-9]+/(tcp|udp)$ ]]; then
-            # Number with protocol, extract port number for validation
-            PORT_NUM=$(echo "$PORT" | cut -d'/' -f1)
-            if [ "$PORT_NUM" -ge 1 ] && [ "$PORT_NUM" -le 65535 ]; then
-                log_debug "Opening port $PORT..."
-                ufw allow $PORT
-                log_success "Port $PORT opened successfully"
-            else
-                log_error "Invalid port number. Please enter a number between 1 and 65535, or 0 to finish."
-            fi
-        else
-            log_error "Invalid port format. Use: 333, 333/tcp, or 333/udp (or 0 to finish)."
-        fi
-    done
 }
 
 # Final setup
