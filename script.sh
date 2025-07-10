@@ -63,15 +63,6 @@ ask_yes_no() {
     done
 }
 
-run_as_user() {
-    local user="$1"
-    local cmd="$2"
-    local user_id=$(id -u "$user")
-    local runtime_dir="/run/user/$user_id"
-    
-    sudo -u "$user" -H env XDG_RUNTIME_DIR="$runtime_dir" bash -c "$cmd"
-}
-
 # System update and basic packages
 system_update() {
     log_debug "Start updating system"
@@ -240,25 +231,24 @@ optional_software() {
     while true; do
         echo ""
         log_info "Available optional software:"
-        log_info "1. Podman (Container Runtime)"
-        log_info "2. Remnanode (Requires Podman)"
-        log_info "3. Docker (Alternative Container Runtime)"
-        log_info "4. Exit optional installations"
+        log_info "1. Docker (Container Runtime)"
+        log_info "2. Remnanode (Requires Docker)"
+        log_info "3. Exit optional installations"
         echo ""
         
-        read -p "Select option (1-4): " OPTION
+        read -p "Select option (1-3): " OPTION
         
         case $OPTION in
             1)
-                if ask_yes_no "Install Podman?"; then
-                    install_podman
+                if ask_yes_no "Install Docker?"; then
+                    install_docker
                 fi
                 ;;
             2)
-                # Check if Podman is installed
-                if ! command -v podman &> /dev/null; then
-                    log_warning "Podman is not installed. Installing Podman first..."
-                    install_podman
+                # Check if Docker is installed
+                if ! command -v docker &> /dev/null; then
+                    log_warning "Docker is not installed. Installing Docker first..."
+                    install_docker
                 fi
                 
                 if ask_yes_no "Install Remnanode?"; then
@@ -266,69 +256,73 @@ optional_software() {
                 fi
                 ;;
             3)
-                if ask_yes_no "Install Docker?"; then
-                    install_docker
-                fi
-                ;;
-            4)
                 log_info "Exiting optional installations"
                 break
                 ;;
             *)
-                log_warning "Invalid option. Please select 1-4."
+                log_warning "Invalid option. Please select 1-3."
                 ;;
         esac
     done
 }
 
-# Podman Installation Function
-install_podman() {
-    log_debug "Installing Podman..."
+# Docker Installation Function
+install_docker() {
+    log_debug "Installing Docker..."
+    apt-get install -y ca-certificates curl
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+    
+    # Add the repository to Apt sources
+    echo \
+    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+    $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+    tee /etc/apt/sources.list.d/docker.list > /dev/null
+    
     apt-get update
-    apt-get -y install podman
-    log_success "Podman installed successfully"
+    
+    # Install docker with compose
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    log_success "Docker installed successfully"
+
+    ### Add users to docker group ###
+    if [ ${#SUDO_USERS[@]} -gt 0 ]; then
+        log_info "Available sudo users to add to docker group:"
+        for user in "${SUDO_USERS[@]}"; do
+            log_info "- $user"
+        done
+        echo ""
+        
+        while true; do
+            read -p "Enter the username to add to docker group (or '0' to skip): " DOCKER_USER
+            
+            if [[ "$DOCKER_USER" == "0" ]]; then
+                log_warning "Skipping docker group assignment"
+                break
+            elif [[ " ${SUDO_USERS[*]} " =~ " ${DOCKER_USER} " ]]; then
+                log_debug "Adding $DOCKER_USER to docker group..."
+                usermod -aG docker $DOCKER_USER
+                log_success "$DOCKER_USER added to docker group"
+                break
+            else
+                log_error "User $DOCKER_USER is not in the sudo users list!"
+                log_warning "Please select a user from the available sudo users list above, or type '0' to skip."
+            fi
+        done
+    else
+        log_warning "No sudo users available to add to docker group"
+    fi
 }
 
 # Remnanode Installation Function
 install_remnanode() {
-    log_info "Available sudo users for Remnanode installation:"
-    if [ ${#SUDO_USERS[@]} -eq 0 ]; then
-        log_error "No sudo users available. Remnanode requires a sudo user."
-        log_warning "Skipping Remnanode installation."
-        return 1
-    fi
-
-    # Print available sudo users
-    for user in "${SUDO_USERS[@]}"; do
-        log_info "- $user"
-    done
-    echo ""
-    
-    # Loop until valid user is selected
-    while true; do
-        read -p "Enter the username to install Remnanode for: " REMNA_USER
-        
-        # Check if user exists and is in SUDO_USERS array
-        if [[ " ${SUDO_USERS[*]} " =~ " ${REMNA_USER} " ]]; then
-            log_success "User $REMNA_USER selected for Remnanode installation"
-            break
-        else
-            log_error "User $REMNA_USER is not in the sudo users list or does not exist!"
-            log_warning "Please select a user from the available sudo users list above."
-        fi
-    done
-
-    ### Install required packages ###
-    log_debug "Installing required packages for systemd user session..."
-    apt-get update
-    apt-get install -y dbus-user-session systemd-container
-    log_success "Required packages installed"
-
     ### Remnanode Configuration ###
-    log_info "Configuring Remnanode for user $REMNA_USER..."
+    log_info "Configuring Remnanode..."
 
-    # Create configuration directory
-    mkdir -p /etc/remnanode
+    # Create configuration directory in /opt
+    REMNA_DIR="/opt/remnanode"
+    mkdir -p "$REMNA_DIR"
     
     # Get port configuration
     read -p "Enter the port for Remnanode (default: 5777): " REMNA_PORT
@@ -362,98 +356,93 @@ install_remnanode() {
 
     # Create .env file
     log_debug "Creating environment configuration..."
-    tee /etc/remnanode/.env > /dev/null <<EOF
+    cat > "$REMNA_DIR/.env" << EOF
 APP_PORT=$REMNA_PORT
 SSL_CERT="$SSL_CERT"
 EOF
 
-    # Set proper permissions for the .env file
-    chown $REMNA_USER:$REMNA_USER /etc/remnanode/.env
-    chmod 600 /etc/remnanode/.env
+    # Create docker-compose.yml file
+    log_debug "Creating docker-compose.yml file..."
+    cat > "$REMNA_DIR/docker-compose.yml" << EOF
+services:
+  remnanode:
+    container_name: remnanode
+    hostname: remnanode
+    image: remnawave/node:latest
+    restart: always
+    network_mode: host
+    env_file:
+      - .env
+EOF
 
-    log_success "Environment file created at /etc/remnanode/.env"
+    # Set proper permissions
+    chmod 600 "$REMNA_DIR/.env"
 
-    ### Firewall Configuration ###
-    log_debug "Configuring firewall for port $REMNA_PORT..."
+    log_success "Docker Compose configuration created at $REMNA_DIR"
+
+    ### Start the container ###
+    log_debug "Starting Remnanode container..."
+    cd "$REMNA_DIR"
+    docker compose up -d
+    log_success "Remnanode container started successfully"
+
+    ### Configure firewall for Remnanode port ###
+    log_debug "Configuring firewall for Remnanode port $REMNA_PORT..."
     ufw allow $REMNA_PORT
-    log_success "UFW rule added for port $REMNA_PORT"
+    log_success "UFW rule added for Remnanode port $REMNA_PORT"
 
-    ### Enable linger first ###
-    log_debug "Enabling linger for user $REMNA_USER..."
-    loginctl enable-linger $REMNA_USER
-    log_success "Linger enabled - service will start automatically on boot"
+    ### Additional ports configuration ###
+    log_info "Do you want to open additional ports for this service?"
+    configure_additional_ports
 
-    ### Configure Podman for the user ###
-    log_debug "Configuring Podman for user $REMNA_USER..."
-    
-    # Set cgroup manager to systemd for the user
-    run_as_user "$REMNA_USER" "mkdir -p /home/$REMNA_USER/.config/containers"
-    run_as_user "$REMNA_USER" "cat > /home/$REMNA_USER/.config/containers/containers.conf << 'EOF'
-[containers]
-cgroup_manager = \"systemd\"
-EOF"
-
-    # Create user systemd directory
-    run_as_user "$REMNA_USER" "mkdir -p /home/$REMNA_USER/.config/systemd/user"
-
-    ### Setup environment variables ###
-    local USER_ID=$(id -u $REMNA_USER)
-    local XDG_RUNTIME_DIR="/run/user/$USER_ID"
-    
-    # Ensure the runtime directory exists
-    mkdir -p "$XDG_RUNTIME_DIR"
-    chown $REMNA_USER:$REMNA_USER "$XDG_RUNTIME_DIR"
-    chmod 700 "$XDG_RUNTIME_DIR"
-
-    ### Run Container ###
-    log_debug "Running Remnanode container..."
-    run_as_user "$REMNA_USER" "cd /home/$REMNA_USER && podman run \
-        --name remnanode \
-        --publish $REMNA_PORT:$REMNA_PORT \
-        --env-file /etc/remnanode/.env \
-        --detach \
-        docker.io/remnawave/node:latest"
-
-    ### Generate systemd service ###
-    log_debug "Generating systemd service..."
-    run_as_user "$REMNA_USER" "cd /home/$REMNA_USER && podman generate systemd --new --files --name remnanode"
-    run_as_user "$REMNA_USER" "mv /home/$REMNA_USER/container-remnanode.service /home/$REMNA_USER/.config/systemd/user/"
-
-    ### Enable and start the service ###
-    log_debug "Enabling and starting Remnanode service..."
-    run_as_user "$REMNA_USER" "systemctl --user daemon-reload"
-    run_as_user "$REMNA_USER" "systemctl --user enable container-remnanode"
-    run_as_user "$REMNA_USER" "systemctl --user start container-remnanode"
-
-    ### Check service status ###
-    log_debug "Checking service status..."
-    run_as_user "$REMNA_USER" "systemctl --user status container-remnanode --no-pager -l"
+    ### Service status ###
+    log_debug "Checking container status..."
+    docker ps | grep remnanode
 
     log_success "Remnanode installation completed!"
     log_success "Service is running on port $REMNA_PORT"
-    log_info "You can check logs with: sudo -u $REMNA_USER XDG_RUNTIME_DIR=\"/run/user/\$(id -u $REMNA_USER)\" journalctl --user -u container-remnanode -f"
-    log_info "You can check service status with: sudo -u $REMNA_USER XDG_RUNTIME_DIR=\"/run/user/\$(id -u $REMNA_USER)\" systemctl --user status container-remnanode"
+    log_info "You can check logs with: docker logs remnanode"
+    log_info "You can stop the service with: docker compose -f $REMNA_DIR/docker-compose.yml down"
+    log_info "You can start the service with: docker compose -f $REMNA_DIR/docker-compose.yml up -d"
 }
 
-# Docker Installation Function
-install_docker() {
-    log_debug "Installing Docker..."
-    apt-get install -y ca-certificates curl
-    install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-    chmod a+r /etc/apt/keyrings/docker.asc
+# Configure additional ports
+configure_additional_ports() {
+    log_info "Enter additional ports to open (enter 0 to finish):"
+    log_info "Formats accepted: 333, 333/tcp, 333/udp"
     
-    # Add the repository to Apt sources
-    echo \
-    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
-    $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-    tee /etc/apt/sources.list.d/docker.list > /dev/null
-    
-    apt-get update
-    
-    # Install docker with compose
-    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-    log_success "Docker installed successfully"
+    while true; do
+        read -p "Enter port (0 to finish): " PORT
+        
+        if [[ "$PORT" == "0" ]]; then
+            log_info "Finished configuring additional ports"
+            break
+        fi
+        
+        # Validate port format (number, number/tcp, number/udp)
+        if [[ "$PORT" =~ ^[0-9]+$ ]]; then
+            # Just a number, validate range
+            if [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ]; then
+                log_debug "Opening port $PORT..."
+                ufw allow $PORT
+                log_success "Port $PORT opened successfully"
+            else
+                log_error "Invalid port number. Please enter a number between 1 and 65535, or 0 to finish."
+            fi
+        elif [[ "$PORT" =~ ^[0-9]+/(tcp|udp)$ ]]; then
+            # Number with protocol, extract port number for validation
+            PORT_NUM=$(echo "$PORT" | cut -d'/' -f1)
+            if [ "$PORT_NUM" -ge 1 ] && [ "$PORT_NUM" -le 65535 ]; then
+                log_debug "Opening port $PORT..."
+                ufw allow $PORT
+                log_success "Port $PORT opened successfully"
+            else
+                log_error "Invalid port number. Please enter a number between 1 and 65535, or 0 to finish."
+            fi
+        else
+            log_error "Invalid port format. Use: 333, 333/tcp, or 333/udp (or 0 to finish)."
+        fi
+    done
 }
 
 # Final setup
