@@ -380,15 +380,19 @@ EOF
         ###########################################
 
         log_debug "Running Remnanode container..."
-        sudo -u $REMNA_USER podman run \
+        sudo -u $REMNA_USER -H bash -c "cd /home/$REMNA_USER && podman run \
             --name remnanode \
-            --publish "$REMNA_PORT:$REMNA_PORT" \
+            --publish $REMNA_PORT:$REMNA_PORT \
             --env-file /etc/remnanode/.env \
             --detach \
-            docker.io/remnawave/node:latest
+            docker.io/remnawave/node:latest"
 
         log_debug "Generating systemd service..."
-        sudo -u $REMNA_USER podman generate systemd --new --files --name remnanode
+        sudo -u $REMNA_USER -H bash -c "cd /home/$REMNA_USER && podman generate systemd --new --files --name remnanode"
+        
+        log_debug "Setting up systemd service..."
+        sudo -u $REMNA_USER -H bash -c "mkdir -p /home/$REMNA_USER/.config/systemd/user"
+        sudo -u $REMNA_USER -H bash -c "mv /home/$REMNA_USER/container-remnanode.service /home/$REMNA_USER/.config/systemd/user/"
         
         # Enable linger first
         log_debug "Enabling linger for user $REMNA_USER..."
@@ -397,16 +401,16 @@ EOF
 
         # Enable and start the user service
         log_debug "Enabling and starting Remnanode service..."
-        sudo -u $REMNA_USER systemctl --user daemon-reload
-        sudo -u $REMNA_USER systemctl --user enable container-remnanode
-        sudo -u $REMNA_USER systemctl --user start container-remnanode
-
+        sudo -u $REMNA_USER XDG_RUNTIME_DIR="/run/user/$(id -u $REMNA_USER)" systemctl --user daemon-reload
+        sudo -u $REMNA_USER XDG_RUNTIME_DIR="/run/user/$(id -u $REMNA_USER)" systemctl --user enable container-remnanode
+        sudo -u $REMNA_USER XDG_RUNTIME_DIR="/run/user/$(id -u $REMNA_USER)" systemctl --user start container-remnanode
+        
         log_debug "Checking service status..."
-        sudo -u $REMNA_USER systemctl --user status container-remnanode --no-pager -l
+        sudo -u $REMNA_USER XDG_RUNTIME_DIR="/run/user/$(id -u $REMNA_USER)" systemctl --user status container-remnanode --no-pager -l
 
         log_success "Remnanode installation completed!"
         log_success "Service is running on port $REMNA_PORT"
-        log_info "You can check logs with: sudo -u $REMNA_USER journalctl --user -u container-remnanode -f"
+        log_info "You can check logs with: sudo -u $REMNA_USER XDG_RUNTIME_DIR=\"/run/user/\$(id -u $REMNA_USER)\" journalctl --user -u container-remnanode -f"
     fi
 else
     log_warning "Podman and Remnanode installation skipped."
@@ -427,16 +431,4 @@ if [[ "$INSTALLED_UFW" -eq 1 ]]; then
     else
         log_warning "UFW not enabled. You can enable it later with: sudo ufw enable"
     fi
-fi
-
-if [[ "${INSTALL_PODMAN:-n}" =~ ^([yY][eE][sS]|[yY])$ ]] && [ ${#SUDO_USERS[@]} -gt 0 ] && [[ -n "${REMNA_USER:-}" ]]; then
-    echo ""
-    log_success "RemnaNode Information:"
-    log_info "- Service: container-remnanode (user service)"
-    log_info "- Port: $REMNA_PORT"
-    log_info "- User: $REMNA_USER"
-    log_info "- Config: /etc/remnanode/.env"
-    log_debug "- Status: sudo -u $REMNA_USER systemctl --user status container-remnanode"
-    log_debug "- Logs: sudo -u $REMNA_USER journalctl --user -u container-remnanode -f"
-    echo ""
 fi
