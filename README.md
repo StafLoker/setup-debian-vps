@@ -3,8 +3,6 @@
    <p><i>~ Automated server configuration ~</i></p>
    <p align="center">
        · <a href="https://github.com/StafLoker/setup-debian-vps/releases">Releases</a> ·
-       <a href="https://github.com/StafLoker/setup-debian-vps/issues">Issues</a> ·
-       <a href="https://github.com/StafLoker/setup-debian-vps/wiki">Wiki</a> ·
    </p>
 </div>
 
