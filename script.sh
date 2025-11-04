@@ -367,37 +367,36 @@ install_remnanode() {
     read -p "Enter the port for Remnanode (default: 5777): " REMNA_PORT
     REMNA_PORT=${REMNA_PORT:-5777}
 
-    # Get SSL certificate
-    log_info "Enter the SSL certificate (copy from main panel):"
-    log_info "Format: SSL_CERT=\"CERT_FROM_MAIN_PANEL\""
+    # Get secret key
+    log_info "Enter the Secret key (copy from main panel):"
     
     while true; do
-        read -p "SSL Certificate: " SSL_CERT_INPUT
+        read -p "Secret key: " SECRET_KEY_INPUT
         
-        # Check if input starts with SSL_CERT= and remove it
-        if [[ "$SSL_CERT_INPUT" =~ ^SSL_CERT= ]]; then
-            # Remove SSL_CERT= prefix and quotes if present
-            SSL_CERT="${SSL_CERT_INPUT#SSL_CERT=}"
-            SSL_CERT="${SSL_CERT%\"}"  # Remove trailing quote
-            SSL_CERT="${SSL_CERT#\"}"  # Remove leading quote
-            log_debug "Cleaned SSL_CERT input"
+        # Check if input starts with SECRET_KEY= and remove it
+        if [[ "$SECRET_KEY_INPUT" =~ ^SECRET_KEY= ]]; then
+            # Remove SECRET_KEY= prefix and quotes if present
+            SECRET_KEY="${SECRET_KEY_INPUT#SECRET_KEY=}"
+            SECRET_KEY="${SECRET_KEY%\"}"  # Remove trailing quote
+            SECRET_KEY="${SECRET_KEY#\"}"  # Remove leading quote
+            log_debug "Cleaned SECRET_KEY input"
         else
-            SSL_CERT="$SSL_CERT_INPUT"
+            SECRET_KEY="$SECRET_KEY_INPUT"
         fi
         
         # Validate that we have some content
-        if [[ -n "$SSL_CERT" ]]; then
+        if [[ -n "$SECRET_KEY" ]]; then
             break
         else
-            log_error "SSL certificate cannot be empty. Please provide a valid certificate."
+            log_error "Secret key cannot be empty. Please provide a valid certificate."
         fi
     done
 
     # Create .env file
     log_debug "Creating environment configuration..."
     cat > "$REMNA_DIR/.env" << EOF
-APP_PORT=$REMNA_PORT
-SSL_CERT="$SSL_CERT"
+NODE_PORT=$REMNA_PORT
+SECRET_KEY="$SECRET_KEY"
 EOF
 
     # Create docker-compose.yml file
