@@ -14,7 +14,12 @@ readonly RESET='\033[0m'
 CREATED_USERS=()
 SUDO_USERS=()
 SSH_PORT=""
-INSTALLED_SERVICES=()
+
+# Installation paths
+readonly REMNA_DIR="/opt/remnanode"
+
+# External URLs
+readonly MOTD_INSTALL_URL="https://raw.githubusercontent.com/StafLoker/linux-utils/main/motd/install.sh"
 
 # Function to print INFO messages
 log_info() {
@@ -39,6 +44,16 @@ log_warning() {
 # Function to print DEBUG messages
 log_debug() {
     echo -e "${BLUE}[DEBUG] $1${RESET}"
+}
+
+# Function to check if Docker is installed
+is_docker_installed() {
+    command -v docker &> /dev/null && command -v docker-compose &> /dev/null
+}
+
+# Function to check if Remnanode is installed
+is_remnanode_installed() {
+    [[ -d "$REMNA_DIR" ]] && [[ -f "$REMNA_DIR/docker-compose.yml" ]]
 }
 
 # Function to ask yes/no questions
@@ -203,8 +218,8 @@ create_users() {
 # Configure SSH
 configure_ssh() {
     # Get SSH port configuration
-    read -p "Enter SSH port (default: 403): " SSH_PORT
-    SSH_PORT=${SSH_PORT:-403}
+    read -p "Enter SSH port (default: 22): " SSH_PORT
+    SSH_PORT=${SSH_PORT:-22}
 
     log_debug "Configuring SSH config (sshd_config)"
     sed -i "s/#Port 22/Port $SSH_PORT/" /etc/ssh/sshd_config
@@ -218,12 +233,6 @@ configure_ssh() {
 
 # Configure UFW
 configure_ufw() {
-    # Use default SSH port if not configured
-    if [ -z "$SSH_PORT" ]; then
-        log_warning "SSH_PORT not configured, using default port 403"
-        SSH_PORT=403
-    fi
-
     log_debug "Install ufw package"
     apt install -y ufw
     log_success "UFW package installed"
@@ -241,7 +250,7 @@ configure_ufw() {
 # Install other packages
 install_packages() {
     log_debug "Install common packages"
-    apt install -y wget vim ca-certificates curl tree
+    apt install -y vim curl wget ca-certificates tree
     log_success "Additional packages installed"
 }
 
@@ -258,7 +267,7 @@ setup_customization() {
 
         log_debug "Installing custom MOTD scripts..."
         # Install MOTD scripts from linux-utils repo
-        bash -c "$(curl -fsSL https://raw.githubusercontent.com/StafLoker/linux-utils/main/motd/install.sh)"
+        bash -c "$(curl -fsSL $MOTD_INSTALL_URL)"
         log_success "Custom MOTD scripts installed successfully"
     else
         log_warning "MOTD setup skipped"
@@ -273,17 +282,17 @@ optional_software() {
         log_info "Available optional software:"
 
         # Show Docker status
-        if [[ " ${INSTALLED_SERVICES[*]} " =~ " docker " ]]; then
+        if is_docker_installed; then
             log_info "1. Docker (Container Runtime) [INSTALLED]"
         else
             log_info "1. Docker (Container Runtime)"
         fi
 
         # Show Remnanode status
-        if [[ " ${INSTALLED_SERVICES[*]} " =~ " remnanode " ]]; then
-            log_info "2. Remnanode (Requires Docker) [INSTALLED]"
+        if is_remnanode_installed; then
+            log_info "2. Remnanode [INSTALLED]"
         else
-            log_info "2. Remnanode (Requires Docker)"
+            log_info "2. Remnanode"
         fi
 
         log_info "3. Exit optional installations"
@@ -294,8 +303,8 @@ optional_software() {
         case $OPTION in
             1)
                 # Check if Docker is already installed
-                if [[ " ${INSTALLED_SERVICES[*]} " =~ " docker " ]]; then
-                    log_warning "Docker is already installed in this session"
+                if is_docker_installed; then
+                    log_warning "Docker is already installed"
                     continue
                 fi
 
@@ -305,13 +314,13 @@ optional_software() {
                 ;;
             2)
                 # Check if Remnanode is already installed
-                if [[ " ${INSTALLED_SERVICES[*]} " =~ " remnanode " ]]; then
-                    log_warning "Remnanode is already installed in this session"
+                if is_remnanode_installed; then
+                    log_warning "Remnanode is already installed"
                     continue
                 fi
 
                 # Check if Docker is installed
-                if ! command -v docker &> /dev/null && [[ ! " ${INSTALLED_SERVICES[*]} " =~ " docker " ]]; then
+                if ! is_docker_installed; then
                     log_warning "Docker is not installed. Installing Docker first..."
                     install_docker
                 fi
@@ -348,9 +357,6 @@ install_docker() {
     apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     log_success "Docker installed successfully"
 
-    # Track Docker installation
-    INSTALLED_SERVICES+=("docker")
-
     ### Add users to docker group ###
     if [ ${#SUDO_USERS[@]} -gt 0 ]; then
         log_info "Available sudo users to add to docker group:"
@@ -382,11 +388,8 @@ install_docker() {
 
 # Remnanode Installation Function
 install_remnanode() {
-    ### Remnanode Configuration ###
     log_info "Configuring Remnanode..."
 
-    # Create configuration directory in /opt
-    REMNA_DIR="/opt/remnanode"
     mkdir -p "$REMNA_DIR"
     
     # Get version configuration
@@ -456,13 +459,18 @@ EOF
     log_success "Remnanode container started successfully"
 
     ### Configure firewall for Remnanode port ###
-    log_debug "Configuring firewall for Remnanode port $REMNA_PORT..."
-    ufw allow $REMNA_PORT
-    log_success "UFW rule added for Remnanode port $REMNA_PORT"
+    if command -v ufw &> /dev/null; then
+        log_debug "Configuring firewall for Remnanode port $REMNA_PORT..."
+        ufw allow $REMNA_PORT
+        log_success "UFW rule added for Remnanode port $REMNA_PORT"
 
-    ### Additional ports configuration ###
-    log_info "Do you want to open additional ports for this service?"
-    configure_additional_ports
+        ### Additional ports configuration ###
+        log_info "Do you want to open additional ports for this service? (like 443/tcp)"
+        configure_additional_ports
+    else
+        log_warning "UFW is not installed. Skipping firewall configuration."
+        log_info "To configure firewall later, install UFW and run: sudo ufw allow $REMNA_PORT"
+    fi
 
     ### Service status ###
     log_debug "Checking container status..."
@@ -470,12 +478,8 @@ EOF
 
     log_success "Remnanode installation completed!"
     log_success "Service is running on port $REMNA_PORT"
-    log_info "You can check logs with: docker logs remnanode"
     log_info "You can stop the service with: docker compose -f $REMNA_DIR/docker-compose.yml down"
     log_info "You can start the service with: docker compose -f $REMNA_DIR/docker-compose.yml up -d"
-
-    # Track Remnanode installation
-    INSTALLED_SERVICES+=("remnanode")
 }
 
 # Show main menu
@@ -485,6 +489,8 @@ show_main_menu() {
     log_info "Select how you want to run the setup:"
     log_info "1. Full setup (run all steps)"
     log_info "2. Run specific steps independently"
+    echo ""
+    log_info "Ctrl+C for exit"
     echo ""
 
     while true; do
@@ -508,7 +514,7 @@ show_main_menu() {
     done
 }
 
-# Show interactive step menu (only independent steps)
+# Show interactive step menu
 show_interactive_menu() {
     while true; do
         echo ""
@@ -517,7 +523,7 @@ show_interactive_menu() {
         log_info "2. Change the hostname"
         log_info "3. Change root password"
         log_info "4. Create new users"
-        log_info "5. Install other packages (wget, vim)"
+        log_info "5. Install other packages"
         log_info "6. Customization (MOTD)"
         log_info "7. Optional Software Installation (Docker, Remnanode)"
         echo ""
@@ -624,12 +630,9 @@ main() {
     # Welcome message
     echo -e "${GREEN}>----- SETUP -----<${RESET}"
 
-    # Show main menu and get mode selection
     if show_main_menu; then
-        # Mode 1: Run full setup
         run_full_setup
     else
-        # Mode 2: Interactive mode - run specific steps
         show_interactive_menu
     fi
 
@@ -637,5 +640,4 @@ main() {
     final_setup
 }
 
-# Execute main function
 main "$@"
