@@ -2,6 +2,11 @@
 
 set -euo pipefail
 
+# Check if script is run as root
+check_root() {
+    [ "$EUID" -ne 0 ] && echo "Run as root" && exit 1
+}
+
 # Color Definitions
 readonly RED='\033[31m'
 readonly YELLOW='\033[33m'
@@ -129,6 +134,19 @@ system_update() {
     log_debug "Install sudo package"
     apt install -y sudo
     log_success "Sudo package installed"
+
+    # Add /usr/sbin to PATH if not already present
+    log_debug "Configuring PATH to include /usr/sbin..."
+    if ! grep -q 'export PATH=$PATH:/usr/sbin' ~/.bashrc; then
+        echo 'export PATH=$PATH:/usr/sbin' >> ~/.bashrc
+        log_success "/usr/sbin added to PATH in ~/.bashrc"
+    else
+        log_info "/usr/sbin already in PATH"
+    fi
+
+    # Apply changes to current session
+    export PATH=$PATH:/usr/sbin
+    log_success "PATH configuration completed"
 }
 
 # Change hostname
@@ -573,7 +591,7 @@ show_interactive_menu() {
 }
 
 # Final setup
-final_setup() {
+enable_ufw() {
     echo -e "${GREEN}>----- SETUP COMPLETE -----<${RESET}"
 
     if ask_yes_no "Do you want to enable UFW now?" "y"; then
@@ -623,18 +641,21 @@ run_full_setup() {
     # STEP 9: Optional Software Installation
     log_info "STEP 9: Optional Software Installation"
     optional_software
+
+    # Final setup
+    enable_ufw
 }
 
 # Main function
 main() {
+    # Check root privileges first
+    check_root
+
     if show_main_menu; then
         run_full_setup
     else
         show_interactive_menu
     fi
-
-    # Final setup
-    final_setup
 }
 
 main "$@"
