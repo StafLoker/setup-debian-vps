@@ -14,6 +14,8 @@ readonly RESET='\033[0m'
 CREATED_USERS=()
 SUDO_USERS=()
 SSH_PORT=""
+INSTALLED_SERVICES=()
+START_STEP=1
 
 # Function to print INFO messages
 log_info() {
@@ -242,23 +244,17 @@ install_packages() {
 setup_customization() {
     ### MOTD Setup ###
     if ask_yes_no "Do you want to set up a custom welcome message (MOTD)?"; then
-        log_debug "Creating custom MOTD script..."
+        log_debug "Removing standard Debian MOTD files..."
+        # Remove or disable default MOTD files
+        rm -f /etc/motd
+        rm -f /etc/update-motd.d/10-uname
+        chmod -x /etc/update-motd.d/* 2>/dev/null || true
+        log_success "Standard MOTD files removed"
 
-        cat << EOF > /etc/update-motd.d/99-custom-message
-#!/bin/bash
-echo "Welcome to $(hostname), today is: $(date)"
-echo "Server IP: $(hostname -I)"
-echo "CPU Usage: $(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1}')%"
-echo "Ram Usage: $(free -m | grep Mem | awk '{print $3 "/" $2}') MB"
-echo "Disk Usage (/): $(df -h / | awk 'NR==2 {print $5}')"
-echo
-echo "Last connections:"
-last -a | head -n 5
-echo
-EOF
-
-        chmod +x /etc/update-motd.d/99-custom-message
-        log_success "Custom MOTD set up successfully"
+        log_debug "Installing custom MOTD scripts..."
+        # Install MOTD scripts from linux-utils repo
+        bash -c "$(curl -fsSL https://raw.githubusercontent.com/StafLoker/linux-utils/main/motd/install.sh)"
+        log_success "Custom MOTD scripts installed successfully"
     else
         log_warning "MOTD setup skipped"
     fi
@@ -270,29 +266,52 @@ optional_software() {
     while true; do
         echo ""
         log_info "Available optional software:"
-        log_info "1. Docker (Container Runtime)"
-        log_info "2. Remnanode (Requires Docker)"
+
+        # Show Docker status
+        if [[ " ${INSTALLED_SERVICES[*]} " =~ " docker " ]]; then
+            log_info "1. Docker (Container Runtime) [INSTALLED]"
+        else
+            log_info "1. Docker (Container Runtime)"
+        fi
+
+        # Show Remnanode status
+        if [[ " ${INSTALLED_SERVICES[*]} " =~ " remnanode " ]]; then
+            log_info "2. Remnanode (Requires Docker) [INSTALLED]"
+        else
+            log_info "2. Remnanode (Requires Docker)"
+        fi
+
         log_info "3. Exit optional installations"
         echo ""
-        
+
         read -p "Select option (1-3): " OPTION
-        
+
         case $OPTION in
             1)
+                # Check if Docker is already installed
+                if [[ " ${INSTALLED_SERVICES[*]} " =~ " docker " ]]; then
+                    log_warning "Docker is already installed in this session"
+                    continue
+                fi
+
                 if ask_yes_no "Install Docker?"; then
                     install_docker
                 fi
                 ;;
             2)
+                # Check if Remnanode is already installed
+                if [[ " ${INSTALLED_SERVICES[*]} " =~ " remnanode " ]]; then
+                    log_warning "Remnanode is already installed in this session"
+                    continue
+                fi
+
                 # Check if Docker is installed
-                if ! command -v docker &> /dev/null; then
+                if ! command -v docker &> /dev/null && [[ ! " ${INSTALLED_SERVICES[*]} " =~ " docker " ]]; then
                     log_warning "Docker is not installed. Installing Docker first..."
                     install_docker
                 fi
-                
-                if ask_yes_no "Install Remnanode?"; then
-                    install_remnanode
-                fi
+
+                install_remnanode
                 ;;
             3)
                 log_info "Exiting optional installations"
@@ -312,18 +331,21 @@ install_docker() {
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
     chmod a+r /etc/apt/keyrings/docker.asc
-    
+
     # Add the repository to Apt sources
     echo \
     "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
     $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
     tee /etc/apt/sources.list.d/docker.list > /dev/null
-    
+
     apt-get update
-    
+
     # Install docker with compose
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     log_success "Docker installed successfully"
+
+    # Track Docker installation
+    INSTALLED_SERVICES+=("docker")
 
     ### Add users to docker group ###
     if [ ${#SUDO_USERS[@]} -gt 0 ]; then
@@ -332,10 +354,10 @@ install_docker() {
             log_info "- $user"
         done
         echo ""
-        
+
         while true; do
             read -p "Enter the username to add to docker group (or '0' to skip): " DOCKER_USER
-            
+
             if [[ "$DOCKER_USER" == "0" ]]; then
                 log_warning "Skipping docker group assignment"
                 break
@@ -442,6 +464,60 @@ EOF
     log_info "You can check logs with: docker logs remnanode"
     log_info "You can stop the service with: docker compose -f $REMNA_DIR/docker-compose.yml down"
     log_info "You can start the service with: docker compose -f $REMNA_DIR/docker-compose.yml up -d"
+
+    # Track Remnanode installation
+    INSTALLED_SERVICES+=("remnanode")
+}
+
+# Show step selection menu
+show_step_menu() {
+    echo -e "${GREEN}>----- SETUP MODE SELECTION -----<${RESET}"
+    echo ""
+    log_info "Select how you want to run the setup:"
+    log_info "1. Full setup (run all steps)"
+    log_info "2. Select starting step (skip initial steps)"
+    echo ""
+
+    while true; do
+        read -p "Select option (1-2): " SETUP_MODE
+
+        case $SETUP_MODE in
+            1)
+                START_STEP=1
+                log_info "Running full setup from step 1"
+                break
+                ;;
+            2)
+                echo ""
+                log_info "Available steps:"
+                log_info "1. System update & install necessary packages"
+                log_info "2. Change the hostname"
+                log_info "3. Change root password"
+                log_info "4. Create new users"
+                log_info "5. Configure SSH"
+                log_info "6. Configure firewall (UFW)"
+                log_info "7. Install other packages"
+                log_info "8. Customization"
+                log_info "9. Optional Software Installation"
+                echo ""
+
+                while true; do
+                    read -p "Enter starting step (1-9): " START_STEP
+
+                    if [[ "$START_STEP" =~ ^[1-9]$ ]]; then
+                        log_info "Starting from step $START_STEP"
+                        break 2
+                    else
+                        log_error "Invalid step. Please enter a number between 1 and 9."
+                    fi
+                done
+                ;;
+            *)
+                log_warning "Invalid option. Please select 1 or 2."
+                ;;
+        esac
+    done
+    echo ""
 }
 
 # Final setup
@@ -462,52 +538,73 @@ final_setup() {
 main() {
     # Welcome message
     echo -e "${GREEN}>----- SETUP -----<${RESET}"
-    
+
+    # Show step selection menu
+    show_step_menu
+
     # STEP 1: System update & install necessary packages
-    log_info "STEP 1"
-    log_info "System update & install necessary packages"
-    system_update
-    
+    if [ $START_STEP -le 1 ]; then
+        log_info "STEP 1"
+        log_info "System update & install necessary packages"
+        system_update
+    fi
+
     # STEP 2: Change the hostname
-    log_info "STEP 2"
-    log_info "Change the hostname"
-    change_hostname
-    
+    if [ $START_STEP -le 2 ]; then
+        log_info "STEP 2"
+        log_info "Change the hostname"
+        change_hostname
+    fi
+
     # STEP 3: Change root password
-    log_info "STEP 3"
-    log_info "Change root password"
-    change_root_password
-    
+    if [ $START_STEP -le 3 ]; then
+        log_info "STEP 3"
+        log_info "Change root password"
+        change_root_password
+    fi
+
     # STEP 4: Create new users
-    log_info "STEP 4"
-    log_info "Create new users"
-    create_users
-    
+    if [ $START_STEP -le 4 ]; then
+        log_info "STEP 4"
+        log_info "Create new users"
+        create_users
+    fi
+
     # STEP 5: Configure SSH
-    log_info "STEP 5"
-    log_info "Configure SSH"
-    configure_ssh
-    
+    if [ $START_STEP -le 5 ]; then
+        log_info "STEP 5"
+        log_info "Configure SSH"
+        configure_ssh
+    fi
+
     # STEP 6: Configure firewall (UFW)
-    log_info "STEP 6"
-    log_info "Configure firewall (UFW)"
-    configure_ufw
-    
+    if [ $START_STEP -le 6 ]; then
+        log_info "STEP 6"
+        log_info "Configure firewall (UFW)"
+        configure_ufw
+    fi
+
     # STEP 7: Install other packages
-    log_info "STEP 7"
-    log_info "Install other packages"
-    install_packages
-    
+    if [ $START_STEP -le 7 ]; then
+        log_info "STEP 7"
+        log_info "Install other packages"
+        install_packages
+    fi
+
     # STEP 8: Customization
-    log_info "STEP 8"
-    log_info "Customization"
-    setup_customization
-    
+    if [ $START_STEP -le 8 ]; then
+        log_info "STEP 8"
+        log_info "Customization"
+        setup_customization
+    fi
+
     # STEP 9: Optional Software Installation
-    log_info "STEP 9"
-    log_info "Optional Software Installation"
-    optional_software
-    
+    if [ $START_STEP -le 9 ]; then
+        log_info "STEP 9"
+        log_info "Optional Software Installation"
+        optional_software
+    fi
+
     # Final setup
     final_setup
 }
