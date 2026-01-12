@@ -15,7 +15,6 @@ CREATED_USERS=()
 SUDO_USERS=()
 SSH_PORT=""
 INSTALLED_SERVICES=()
-START_STEP=1
 
 # Function to print INFO messages
 log_info() {
@@ -219,6 +218,12 @@ configure_ssh() {
 
 # Configure UFW
 configure_ufw() {
+    # Use default SSH port if not configured
+    if [ -z "$SSH_PORT" ]; then
+        log_warning "SSH_PORT not configured, using default port 403"
+        SSH_PORT=403
+    fi
+
     log_debug "Install ufw package"
     apt install -y ufw
     log_success "UFW package installed"
@@ -235,8 +240,8 @@ configure_ufw() {
 
 # Install other packages
 install_packages() {
-    log_debug "Install curl, wget, vim packages"
-    apt install -y wget vim
+    log_debug "Install common packages"
+    apt install -y wget vim ca-certificates curl tree
     log_success "Additional packages installed"
 }
 
@@ -327,7 +332,6 @@ optional_software() {
 # Docker Installation Function
 install_docker() {
     log_debug "Installing Docker..."
-    apt-get install -y ca-certificates curl
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
     chmod a+r /etc/apt/keyrings/docker.asc
@@ -338,10 +342,10 @@ install_docker() {
     $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
     tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-    apt-get update
+    apt update
 
     # Install docker with compose
-    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     log_success "Docker installed successfully"
 
     # Track Docker installation
@@ -385,16 +389,21 @@ install_remnanode() {
     REMNA_DIR="/opt/remnanode"
     mkdir -p "$REMNA_DIR"
     
+    # Get version configuration
+    read -p "Enter the Remnanode version to install (default: latest): " REMNA_VERSION
+    REMNA_VERSION=${REMNA_VERSION:-latest}
+    log_info "Installing Remnanode version: $REMNA_VERSION"
+
     # Get port configuration
     read -p "Enter the port for Remnanode (default: 5777): " REMNA_PORT
     REMNA_PORT=${REMNA_PORT:-5777}
 
     # Get secret key
     log_info "Enter the Secret key (copy from main panel):"
-    
+
     while true; do
         read -p "Secret key: " SECRET_KEY_INPUT
-        
+
         # Check if input starts with SECRET_KEY= and remove it
         if [[ "$SECRET_KEY_INPUT" =~ ^SECRET_KEY= ]]; then
             # Remove SECRET_KEY= prefix and quotes if present
@@ -405,7 +414,7 @@ install_remnanode() {
         else
             SECRET_KEY="$SECRET_KEY_INPUT"
         fi
-        
+
         # Validate that we have some content
         if [[ -n "$SECRET_KEY" ]]; then
             break
@@ -428,7 +437,7 @@ services:
   remnanode:
     container_name: remnanode
     hostname: remnanode
-    image: remnawave/node:latest
+    image: remnawave/node:$REMNA_VERSION
     restart: always
     network_mode: host
     env_file:
@@ -469,13 +478,13 @@ EOF
     INSTALLED_SERVICES+=("remnanode")
 }
 
-# Show step selection menu
-show_step_menu() {
+# Show main menu
+show_main_menu() {
     echo -e "${GREEN}>----- SETUP MODE SELECTION -----<${RESET}"
     echo ""
     log_info "Select how you want to run the setup:"
     log_info "1. Full setup (run all steps)"
-    log_info "2. Select starting step (skip initial steps)"
+    log_info "2. Run specific steps independently"
     echo ""
 
     while true; do
@@ -483,41 +492,78 @@ show_step_menu() {
 
         case $SETUP_MODE in
             1)
-                START_STEP=1
-                log_info "Running full setup from step 1"
-                break
+                log_info "Running full setup..."
+                echo ""
+                return 0
                 ;;
             2)
+                log_info "Entering interactive mode..."
                 echo ""
-                log_info "Available steps:"
-                log_info "1. System update & install necessary packages"
-                log_info "2. Change the hostname"
-                log_info "3. Change root password"
-                log_info "4. Create new users"
-                log_info "5. Configure SSH"
-                log_info "6. Configure firewall (UFW)"
-                log_info "7. Install other packages"
-                log_info "8. Customization"
-                log_info "9. Optional Software Installation"
-                echo ""
-
-                while true; do
-                    read -p "Enter starting step (1-9): " START_STEP
-
-                    if [[ "$START_STEP" =~ ^[1-9]$ ]]; then
-                        log_info "Starting from step $START_STEP"
-                        break 2
-                    else
-                        log_error "Invalid step. Please enter a number between 1 and 9."
-                    fi
-                done
+                return 1
                 ;;
             *)
                 log_warning "Invalid option. Please select 1 or 2."
                 ;;
         esac
     done
-    echo ""
+}
+
+# Show interactive step menu (only independent steps)
+show_interactive_menu() {
+    while true; do
+        echo ""
+        echo -e "${GREEN}>----- AVAILABLE INDEPENDENT STEPS -----<${RESET}"
+        log_info "1. System update & install necessary packages"
+        log_info "2. Change the hostname"
+        log_info "3. Change root password"
+        log_info "4. Create new users"
+        log_info "5. Install other packages (wget, vim)"
+        log_info "6. Customization (MOTD)"
+        log_info "7. Optional Software Installation (Docker, Remnanode)"
+        echo ""
+        log_info "q. Exit and finish setup"
+        echo ""
+
+        read -p "Select step (1-7 or q to exit): " STEP_CHOICE
+
+        case $STEP_CHOICE in
+            1)
+                log_info "STEP 1: System update & install necessary packages"
+                system_update
+                ;;
+            2)
+                log_info "STEP 2: Change the hostname"
+                change_hostname
+                ;;
+            3)
+                log_info "STEP 3: Change root password"
+                change_root_password
+                ;;
+            4)
+                log_info "STEP 4: Create new users"
+                create_users
+                ;;
+            5)
+                log_info "STEP 5: Install other packages"
+                install_packages
+                ;;
+            6)
+                log_info "STEP 6: Customization"
+                setup_customization
+                ;;
+            7)
+                log_info "STEP 7: Optional Software Installation"
+                optional_software
+                ;;
+            q|Q)
+                log_info "Exiting interactive mode..."
+                break
+                ;;
+            *)
+                log_warning "Invalid option. Please select 1-7 or q to exit."
+                ;;
+        esac
+    done
 }
 
 # Final setup
@@ -534,75 +580,57 @@ final_setup() {
     fi
 }
 
+# Run full setup (all steps in sequence)
+run_full_setup() {
+    # STEP 1: System update & install necessary packages
+    log_info "STEP 1: System update & install necessary packages"
+    system_update
+
+    # STEP 2: Change the hostname
+    log_info "STEP 2: Change the hostname"
+    change_hostname
+
+    # STEP 3: Change root password
+    log_info "STEP 3: Change root password"
+    change_root_password
+
+    # STEP 4: Create new users
+    log_info "STEP 4: Create new users"
+    create_users
+
+    # STEP 5: Configure SSH
+    log_info "STEP 5: Configure SSH"
+    configure_ssh
+
+    # STEP 6: Configure firewall (UFW)
+    log_info "STEP 6: Configure firewall (UFW)"
+    configure_ufw
+
+    # STEP 7: Install other packages
+    log_info "STEP 7: Install other packages"
+    install_packages
+
+    # STEP 8: Customization
+    log_info "STEP 8: Customization"
+    setup_customization
+
+    # STEP 9: Optional Software Installation
+    log_info "STEP 9: Optional Software Installation"
+    optional_software
+}
+
 # Main function
 main() {
     # Welcome message
     echo -e "${GREEN}>----- SETUP -----<${RESET}"
 
-    # Show step selection menu
-    show_step_menu
-
-    # STEP 1: System update & install necessary packages
-    if [ $START_STEP -le 1 ]; then
-        log_info "STEP 1"
-        log_info "System update & install necessary packages"
-        system_update
-    fi
-
-    # STEP 2: Change the hostname
-    if [ $START_STEP -le 2 ]; then
-        log_info "STEP 2"
-        log_info "Change the hostname"
-        change_hostname
-    fi
-
-    # STEP 3: Change root password
-    if [ $START_STEP -le 3 ]; then
-        log_info "STEP 3"
-        log_info "Change root password"
-        change_root_password
-    fi
-
-    # STEP 4: Create new users
-    if [ $START_STEP -le 4 ]; then
-        log_info "STEP 4"
-        log_info "Create new users"
-        create_users
-    fi
-
-    # STEP 5: Configure SSH
-    if [ $START_STEP -le 5 ]; then
-        log_info "STEP 5"
-        log_info "Configure SSH"
-        configure_ssh
-    fi
-
-    # STEP 6: Configure firewall (UFW)
-    if [ $START_STEP -le 6 ]; then
-        log_info "STEP 6"
-        log_info "Configure firewall (UFW)"
-        configure_ufw
-    fi
-
-    # STEP 7: Install other packages
-    if [ $START_STEP -le 7 ]; then
-        log_info "STEP 7"
-        log_info "Install other packages"
-        install_packages
-    fi
-
-    # STEP 8: Customization
-    if [ $START_STEP -le 8 ]; then
-        log_info "STEP 8"
-        log_info "Customization"
-        setup_customization
-    fi
-
-    # STEP 9: Optional Software Installation
-    if [ $START_STEP -le 9 ]; then
-        log_info "STEP 9"
-        log_info "Optional Software Installation"
-        optional_software
+    # Show main menu and get mode selection
+    if show_main_menu; then
+        # Mode 1: Run full setup
+        run_full_setup
+    else
+        # Mode 2: Interactive mode - run specific steps
+        show_interactive_menu
     fi
 
     # Final setup
