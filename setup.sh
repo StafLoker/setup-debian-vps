@@ -1,10 +1,13 @@
 #!/bin/bash
 
-set -euo pipefail
+set -e
 
 # Check if script is run as root
 check_root() {
-    [ "$EUID" -ne 0 ] && echo "Run as root" && exit 1
+    if [ "$EUID" -ne 0 ]; then
+        echo "Run as root"
+        exit 1
+    fi
 }
 
 # Color Definitions
