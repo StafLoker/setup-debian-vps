@@ -17,6 +17,3 @@
 ```bash
 apt install curl -y && bash -c "$(curl -fsSL https://raw.githubusercontent.com/StafLoker/setup-debian-vps/main/script.sh)"
 ```
-
-## **License**
-This project is open source and available under standard terms.
