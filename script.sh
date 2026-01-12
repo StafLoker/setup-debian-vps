@@ -250,7 +250,7 @@ configure_ufw() {
 # Install other packages
 install_packages() {
     log_debug "Install common packages"
-    apt install -y vim curl wget ca-certificates tree
+    apt install -y vim wget ca-certificates tree
     log_success "Additional packages installed"
 }
 
