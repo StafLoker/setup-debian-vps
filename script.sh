@@ -484,7 +484,7 @@ EOF
 
 # Show main menu
 show_main_menu() {
-    echo -e "${GREEN}>----- SETUP MODE SELECTION -----<${RESET}"
+    echo -e "${GREEN}>----- SETUP OS -----<${RESET}"
     echo ""
     log_info "Select how you want to run the setup:"
     log_info "1. Full setup (run all steps)"
@@ -627,9 +627,6 @@ run_full_setup() {
 
 # Main function
 main() {
-    # Welcome message
-    echo -e "${GREEN}>----- SETUP -----<${RESET}"
-
     if show_main_menu; then
         run_full_setup
     else
