@@ -22,6 +22,7 @@ readonly RESET='\033[0m'
 CREATED_USERS=()
 SUDO_USERS=()
 SSH_PORT=""
+FIREWALL_TYPE=""
 
 # Installation paths
 readonly REMNA_DIR="/opt/remnanode"
@@ -87,19 +88,19 @@ ask_yes_no() {
     done
 }
 
-# Configure additional ports
-configure_additional_ports() {
+# Configure additional ports (UFW)
+configure_additional_ports_ufw() {
     log_info "Enter additional ports to open (enter 0 to finish):"
     log_info "Formats accepted: 333, 333/tcp, 333/udp"
-    
+
     while true; do
         read -p "Enter port (0 to finish): " PORT
-        
+
         if [[ "$PORT" == "0" ]]; then
             log_info "Finished configuring additional ports"
             break
         fi
-        
+
         # Validate port format (number, number/tcp, number/udp)
         if [[ "$PORT" =~ ^[0-9]+$ ]]; then
             # Just a number, validate range
@@ -116,6 +117,44 @@ configure_additional_ports() {
             if [ "$PORT_NUM" -ge 1 ] && [ "$PORT_NUM" -le 65535 ]; then
                 log_debug "Opening port $PORT..."
                 ufw allow $PORT
+                log_success "Port $PORT opened successfully"
+            else
+                log_error "Invalid port number. Please enter a number between 1 and 65535, or 0 to finish."
+            fi
+        else
+            log_error "Invalid port format. Use: 333, 333/tcp, or 333/udp (or 0 to finish)."
+        fi
+    done
+}
+
+# Configure additional ports (iptables)
+configure_additional_ports_iptables() {
+    log_info "Enter additional ports to open (enter 0 to finish):"
+    log_info "Formats accepted: 333, 333/tcp, 333/udp"
+
+    while true; do
+        read -p "Enter port (0 to finish): " PORT
+
+        if [[ "$PORT" == "0" ]]; then
+            log_info "Finished configuring additional ports"
+            break
+        fi
+
+        # Validate port format (number, number/tcp, number/udp)
+        if [[ "$PORT" =~ ^[0-9]+$ ]]; then
+            if [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ]; then
+                log_debug "Opening port $PORT (tcp)..."
+                iptables -A INPUT -p tcp --dport $PORT -j ACCEPT
+                log_success "Port $PORT/tcp opened successfully"
+            else
+                log_error "Invalid port number. Please enter a number between 1 and 65535, or 0 to finish."
+            fi
+        elif [[ "$PORT" =~ ^[0-9]+/(tcp|udp)$ ]]; then
+            PORT_NUM=$(echo "$PORT" | cut -d'/' -f1)
+            PROTO=$(echo "$PORT" | cut -d'/' -f2)
+            if [ "$PORT_NUM" -ge 1 ] && [ "$PORT_NUM" -le 65535 ]; then
+                log_debug "Opening port $PORT..."
+                iptables -A INPUT -p $PROTO --dport $PORT_NUM -j ACCEPT
                 log_success "Port $PORT opened successfully"
             else
                 log_error "Invalid port number. Please enter a number between 1 and 65535, or 0 to finish."
@@ -252,6 +291,35 @@ configure_ssh() {
     log_success "SSH configuration completed on port $SSH_PORT"
 }
 
+# Ask which firewall to install
+configure_firewall() {
+    echo ""
+    log_info "Which firewall do you want to install?"
+    log_info "1. UFW (Uncomplicated Firewall)"
+    log_info "2. iptables"
+    echo ""
+
+    while true; do
+        read -p "Select option (1-2): " FW_CHOICE
+
+        case $FW_CHOICE in
+            1)
+                FIREWALL_TYPE="ufw"
+                configure_ufw
+                break
+                ;;
+            2)
+                FIREWALL_TYPE="iptables"
+                configure_iptables
+                break
+                ;;
+            *)
+                log_warning "Invalid option. Please select 1 or 2."
+                ;;
+        esac
+    done
+}
+
 # Configure UFW
 configure_ufw() {
     log_debug "Install ufw package"
@@ -266,6 +334,42 @@ configure_ufw() {
     ufw status
 
     log_warning "After finishing the system configuration, you can run UFW"
+}
+
+# Configure iptables
+configure_iptables() {
+    log_debug "Installing iptables and iptables-persistent..."
+    apt install -y iptables iptables-persistent
+    log_success "iptables and iptables-persistent installed"
+
+    log_debug "Configuring iptables rules..."
+
+    # Allow loopback
+    iptables -A INPUT -i lo -j ACCEPT
+
+    # Allow established and related connections
+    iptables -A INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+
+    # Allow SSH on configured port
+    iptables -A INPUT -p tcp --dport $SSH_PORT -j ACCEPT
+
+    # Allow ICMP (ping)
+    iptables -A INPUT -p icmp --icmp-type echo-request -j ACCEPT
+
+    # Set default policies
+    iptables -P INPUT DROP
+    iptables -P FORWARD DROP
+    iptables -P OUTPUT ACCEPT
+
+    log_success "iptables rules configured (SSH port $SSH_PORT allowed)"
+
+    # Persist rules
+    log_debug "Saving iptables rules..."
+    iptables-save > /etc/iptables/rules.v4
+    log_success "iptables rules saved to /etc/iptables/rules.v4"
+
+    log_info "Current iptables rules:"
+    iptables -L -n
 }
 
 # Install other packages
@@ -480,17 +584,30 @@ EOF
     log_success "Remnanode container started successfully"
 
     ### Configure firewall for Remnanode port ###
-    if command -v ufw &> /dev/null; then
+    if [[ "$FIREWALL_TYPE" == "ufw" ]]; then
         log_debug "Configuring firewall for Remnanode port $REMNA_PORT..."
         ufw allow $REMNA_PORT
         log_success "UFW rule added for Remnanode port $REMNA_PORT"
 
         ### Additional ports configuration ###
         log_info "Do you want to open additional ports for this service? (like 443/tcp)"
-        configure_additional_ports
+        configure_additional_ports_ufw
+    elif [[ "$FIREWALL_TYPE" == "iptables" ]]; then
+        log_debug "Configuring firewall for Remnanode port $REMNA_PORT..."
+        # Insert before the DROP policy (before the last INPUT rules)
+        iptables -I INPUT -p tcp --dport $REMNA_PORT -j ACCEPT
+        log_success "iptables rule added for Remnanode port $REMNA_PORT"
+
+        ### Additional ports configuration ###
+        log_info "Do you want to open additional ports for this service? (like 443/tcp)"
+        configure_additional_ports_iptables
+
+        # Persist updated rules
+        iptables-save > /etc/iptables/rules.v4
+        log_success "iptables rules saved"
     else
-        log_warning "UFW is not installed. Skipping firewall configuration."
-        log_info "To configure firewall later, install UFW and run: sudo ufw allow $REMNA_PORT"
+        log_warning "No firewall configured. Skipping firewall configuration."
+        log_info "Remember to open port $REMNA_PORT in your firewall"
     fi
 
     ### Service status ###
@@ -594,16 +711,23 @@ show_interactive_menu() {
 }
 
 # Final setup
-enable_ufw() {
+enable_firewall() {
     echo -e "${GREEN}>----- SETUP COMPLETE -----<${RESET}"
 
-    if ask_yes_no "Do you want to enable UFW now?" "y"; then
-        log_debug "Enabling UFW..."
-        ufw --force enable
-        log_success "UFW enabled successfully"
-        ufw status
+    if [[ "$FIREWALL_TYPE" == "ufw" ]]; then
+        if ask_yes_no "Do you want to enable UFW now?" "y"; then
+            log_debug "Enabling UFW..."
+            ufw --force enable
+            log_success "UFW enabled successfully"
+            ufw status
+        else
+            log_warning "UFW not enabled. You can enable it later with: sudo ufw enable"
+        fi
+    elif [[ "$FIREWALL_TYPE" == "iptables" ]]; then
+        log_success "iptables is already active with the configured rules"
+        iptables -L -n
     else
-        log_warning "UFW not enabled. You can enable it later with: sudo ufw enable"
+        log_warning "No firewall was configured"
     fi
 }
 
@@ -629,9 +753,9 @@ run_full_setup() {
     log_info "STEP 5: Configure SSH"
     configure_ssh
 
-    # STEP 6: Configure firewall (UFW)
-    log_info "STEP 6: Configure firewall (UFW)"
-    configure_ufw
+    # STEP 6: Configure firewall
+    log_info "STEP 6: Configure firewall"
+    configure_firewall
 
     # STEP 7: Install other packages
     log_info "STEP 7: Install other packages"
@@ -646,7 +770,7 @@ run_full_setup() {
     optional_software
 
     # Final setup
-    enable_ufw
+    enable_firewall
 }
 
 # Main function
