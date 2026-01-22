@@ -293,6 +293,17 @@ configure_ssh() {
 
 # Ask which firewall to install
 configure_firewall() {
+    # Check if SSH_PORT is set, if not try to read from sshd_config
+    if [[ -z "$SSH_PORT" ]]; then
+        SSH_PORT=$(grep -E "^Port " /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')
+        if [[ -z "$SSH_PORT" ]]; then
+            SSH_PORT=22
+            log_info "SSH port not found in config, using default: 22"
+        else
+            log_info "Detected SSH port from config: $SSH_PORT"
+        fi
+    fi
+
     echo ""
     log_info "Which firewall do you want to install?"
     log_info "1. UFW (Uncomplicated Firewall)"
@@ -377,6 +388,69 @@ install_packages() {
     log_debug "Install common packages"
     apt install -y vim wget ca-certificates tree
     log_success "Additional packages installed"
+}
+
+# Install and configure fail2ban
+install_fail2ban() {
+    # Check if SSH_PORT is set, if not try to read from sshd_config
+    if [[ -z "$SSH_PORT" ]]; then
+        SSH_PORT=$(grep -E "^Port " /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')
+        if [[ -z "$SSH_PORT" ]]; then
+            SSH_PORT=22
+            log_info "SSH port not found in config, using default: 22"
+        else
+            log_info "Detected SSH port from config: $SSH_PORT"
+        fi
+    fi
+
+    log_debug "Installing fail2ban..."
+    apt install -y fail2ban
+    log_success "fail2ban installed"
+
+    # Ask for IP to whitelist
+    read -p "Enter your IP to whitelist in fail2ban (blank to skip): " IGNORE_IP
+    if [[ -n "$IGNORE_IP" ]]; then
+        IGNORE_LINE="ignoreip = 127.0.0.1/8 $IGNORE_IP"
+    else
+        IGNORE_LINE="ignoreip = 127.0.0.1/8"
+    fi
+
+    # Set banaction based on firewall type
+    # If FIREWALL_TYPE is not set, try to detect which firewall is installed
+    if [[ -z "$FIREWALL_TYPE" ]]; then
+        if command -v ufw &> /dev/null && ufw status &> /dev/null; then
+            BAN_ACTION="ufw"
+        else
+            BAN_ACTION="iptables-multiport"
+        fi
+    elif [[ "$FIREWALL_TYPE" == "ufw" ]]; then
+        BAN_ACTION="ufw"
+    else
+        BAN_ACTION="iptables-multiport"
+    fi
+
+    log_debug "Configuring fail2ban for SSH (using $BAN_ACTION)..."
+    cat > /etc/fail2ban/jail.local << EOF
+[DEFAULT]
+banaction = $BAN_ACTION
+bantime = 3600
+findtime = 600
+maxretry = 5
+backend = systemd
+$IGNORE_LINE
+
+[sshd]
+enabled = true
+port = $SSH_PORT
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 3
+EOF
+
+    log_debug "Restarting fail2ban..."
+    systemctl enable fail2ban
+    systemctl restart fail2ban
+    log_success "fail2ban configured and running (SSH protection on port $SSH_PORT)"
 }
 
 # Customization
@@ -661,14 +735,17 @@ show_interactive_menu() {
         log_info "2. Change the hostname"
         log_info "3. Change root password"
         log_info "4. Create new users"
-        log_info "5. Install other packages"
-        log_info "6. Customization (MOTD)"
-        log_info "7. Optional Software Installation (Docker, Remnanode)"
+        log_info "5. Configure SSH"
+        log_info "6. Configure firewall (UFW/iptables)"
+        log_info "7. Install and configure fail2ban"
+        log_info "8. Install other packages"
+        log_info "9. Customization (MOTD)"
+        log_info "10. Optional Software Installation (Docker, Remnanode)"
         echo ""
         log_info "q. Exit and finish setup"
         echo ""
 
-        read -p "Select step (1-7 or q to exit): " STEP_CHOICE
+        read -p "Select step (1-10 or q to exit): " STEP_CHOICE
 
         case $STEP_CHOICE in
             1)
@@ -688,15 +765,27 @@ show_interactive_menu() {
                 create_users
                 ;;
             5)
-                log_info "STEP 5: Install other packages"
-                install_packages
+                log_info "STEP 5: Configure SSH"
+                configure_ssh
                 ;;
             6)
-                log_info "STEP 6: Customization"
-                setup_customization
+                log_info "STEP 6: Configure firewall"
+                configure_firewall
                 ;;
             7)
-                log_info "STEP 7: Optional Software Installation"
+                log_info "STEP 7: Install and configure fail2ban"
+                install_fail2ban
+                ;;
+            8)
+                log_info "STEP 8: Install other packages"
+                install_packages
+                ;;
+            9)
+                log_info "STEP 9: Customization"
+                setup_customization
+                ;;
+            10)
+                log_info "STEP 10: Optional Software Installation"
                 optional_software
                 ;;
             q|Q)
@@ -704,7 +793,7 @@ show_interactive_menu() {
                 break
                 ;;
             *)
-                log_warning "Invalid option. Please select 1-7 or q to exit."
+                log_warning "Invalid option. Please select 1-10 or q to exit."
                 ;;
         esac
     done
@@ -757,16 +846,20 @@ run_full_setup() {
     log_info "STEP 6: Configure firewall"
     configure_firewall
 
-    # STEP 7: Install other packages
-    log_info "STEP 7: Install other packages"
+    # STEP 7: Install and configure fail2ban
+    log_info "STEP 7: Install and configure fail2ban"
+    install_fail2ban
+
+    # STEP 8: Install other packages
+    log_info "STEP 8: Install other packages"
     install_packages
 
-    # STEP 8: Customization
-    log_info "STEP 8: Customization"
+    # STEP 9: Customization
+    log_info "STEP 9: Customization"
     setup_customization
 
-    # STEP 9: Optional Software Installation
-    log_info "STEP 9: Optional Software Installation"
+    # STEP 10: Optional Software Installation
+    log_info "STEP 10: Optional Software Installation"
     optional_software
 
     # Final setup
